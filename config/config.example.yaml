@@ -77,6 +77,7 @@ platforms:
     parallel_detail_fetch: 5       # Number of tabs to open simultaneously (5-8: safe, 10-15: medium risk, 20+: high risk)
     browser:
       headless: false              # Per-platform browser configuration
+      engine: drission             # Engine: drission (stealth) or playwright
       profile_path: ""             # Optional persistent profile path
   linkedin:
     enabled: true                  # ENABLED: Fixed profile persistence logic
@@ -93,6 +94,7 @@ platforms:
     max_pages_per_search: 5        # Maximum pages to scrape per search query
     browser:
       headless: false              # Per-platform browser configuration
+      engine: drission             # Engine: drission (stealth) or playwright
       profile_path: ""             # Optional persistent profile path
   foundit:
     enabled: true                  # ENABLED: Works with API, no login required
