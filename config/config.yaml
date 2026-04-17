@@ -1,0 +1,244 @@
+# ============================================================
+#  JOB SCRAPER CONFIGURATION
+#  Edit this file to customize your job search.
+#  All parameters here drive the entire scraper behavior.
+# ============================================================
+
+# --- User Profile ---
+profile:
+  role: "QA Engineer"
+  experience_years: 3
+  skills:
+    - "Manual Testing"
+    - "Selenium"
+    - "Playwright"
+    - "API Testing"
+    - "Postman"
+
+# --- Search Parameters ---
+search:
+  keywords:
+    - "QA Engineer"
+    - "Software Tester"
+    # Reduced to 2 keywords - run multiple times per day for more jobs
+  locations:
+    - "Pune"
+    # Reduced to 1 location - run multiple times per day for more jobs
+    # IMPORTANT: Only run ONE scraper instance at a time to avoid detection
+  experience_range:
+    min: 2
+    max: 5
+  date_posted_days: 7              # Only jobs posted in last N days
+  only_new_since_last_run: true    # Skip jobs already in master file
+
+# --- Filter Rules ---
+filters:
+  required_skills_any:             # Job must mention at least ONE of these
+    - "QA"
+    - "Tester"
+    - "Quality Assurance"
+    - "Software"
+    - "Manual Testing"
+    - "Selenium"
+    - "Playwright"
+    - "API"
+    - "Automation"
+    - "Postman"
+  exclude_title_keywords:          # Skip if job title contains any of these
+    - "Senior"
+    - "Lead"
+    - "Manager"
+    - "Director"
+    - "Principal"
+    - "Staff"
+    - "Architect"
+  exclude_role_keywords:           # Skip if job title matches unrelated roles or non-IT fields
+    - "Developer"
+    - "Data Engineer"
+    - "Data Scientist"
+    - "DevOps"
+    - "Hardware"
+    - "Manufacturing"
+    - "Production"
+    - "Mechanical"
+    - "Civil"
+    - "Process"
+  max_experience_years: 6          # Skip if job requires more than this
+
+# --- Platform Toggles ---
+platforms:
+  naukri:
+    enabled: false                 # DISABLED: Skipping for this test run
+    email: ""                      # Set via .env file (NAUKRI_EMAIL) - see .env.example
+    password: ""                   # Set via .env file (NAUKRI_PASSWORD) - see .env.example
+    max_jobs: 50                   # Reduced - scrape less per run, run more times per day
+    max_pages_per_search: 2        # Keep at 2 - page 2+ still risky even with proxies
+    fetch_full_descriptions: false  # CHANGED: Disabled for better stealth - opening 40+ detail pages is very detectable
+    parallel_detail_fetch: 5       # Number of tabs to open simultaneously (5-8: safe, 10-15: medium risk, 20+: high risk)
+    browser:
+      headless: false              # Per-platform browser configuration
+      profile_path: ""             # Optional persistent profile path
+  linkedin:
+    enabled: true                  # ENABLED: Fixed profile persistence logic
+    email: ""                      # Set via .env file (LINKEDIN_EMAIL)
+    password: ""                   # Set via .env file (LINKEDIN_PASSWORD)
+    max_jobs: 50                   # Cards to collect from search results
+    max_detail_fetches: 30         # Only open top N cards for full details
+    browser:
+      headless: false              # LinkedIn requires headed browser with persistent profile
+      profile_path: ""             # Optional persistent profile path
+  indeed:
+    enabled: true                  # ENABLED: Fixed profile persistence logic
+    max_jobs: 50                   # Maximum jobs to collect from Indeed
+    max_pages_per_search: 5        # Maximum pages to scrape per search query
+    browser:
+      headless: false              # Per-platform browser configuration
+      profile_path: ""             # Optional persistent profile path
+  foundit:
+    enabled: true                  # ENABLED: Works with API, no login required
+    max_jobs: 50                   # Maximum jobs to collect from Foundit
+    max_pages_per_search: 5        # Maximum pages to scrape per search query
+    api_first: true                # Try API before browser scraping
+    browser:
+      headless: true               # Foundit can use headless browser
+      profile_path: ""             # Optional persistent profile path
+
+# --- Browser & Anti-Bot ---
+browser:
+  headless: false                  # false recommended (especially for LinkedIn)
+  chrome_version_main: 146
+  random_delay:
+    min_seconds: 10                # INCREASED: More human-like delays
+    max_seconds: 20                # INCREASED: Reduces blocking significantly
+  page_load_timeout: 30
+  scroll_pause_seconds: 3          # Increased from 2
+  max_scrolls: 10
+
+# --- Retry & Error Handling ---
+resilience:
+  max_retries: 3
+  retry_delay_seconds: 5
+  save_partial_on_crash: true
+
+# --- Parallelization Settings ---
+parallelization:
+  enabled: false                   # DISABLED: Sequential mode for testing
+  max_workers: 4                   # Maximum concurrent scraper threads
+  per_scraper_timeout: 600         # Timeout per scraper in seconds (10 minutes)
+
+# --- Cache Settings ---
+cache:
+  enabled: true                    # Enable persistent cache layer
+  ttl: 3600                        # Cache time-to-live in seconds (1 hour)
+  backend: "sqlite"                # Cache backend: sqlite or duckdb
+  db_path: "data/cache.db"         # Path to cache database file
+
+# --- Network & Proxies ---
+network:
+  proxy: ""                        # Leave blank - direct connection works better
+  user_agent_rotation: true        # Rotate user-agent on each browser restart
+
+# --- Output ---
+output:
+  master_file_name: "qa_jobs_master.xlsx"
+  description_preview_chars: 300
+  include_full_description: true
+  find_company_career_pages: true  # Automatically find and add company career page links
+
+# --- Email Notifications (optional) ---
+email:
+  enabled: false
+  smtp_server: "smtp.gmail.com"
+  smtp_port: 587
+  sender_email: ""                 # Set via .env file (EMAIL_SENDER) - see .env.example
+  app_password: ""                 # Set via .env file (EMAIL_APP_PASSWORD) - see .env.example
+  recipient_email: ""              # Set via .env file (EMAIL_RECIPIENT) - see .env.example
+
+# --- Scheduling ---
+scheduling:
+  daily_time: "08:00"              # 24hr format for Windows Task Scheduler
+
+# --- AI Auto-Apply Configuration ---
+auto_apply:
+  enabled: true                    # Enable/disable auto-apply feature
+  
+  # AI provider selection
+  ai_provider: "groq"              # Options: gemini, openai, anthropic, ollama, deepseek, groq
+  ai_model: "llama-3.3-70b-versatile"  # Groq's best model for reasoning
+  
+  # Resume and user details
+  resume_path: ""                  # Path to resume PDF (empty = skip upload)
+  user_details:
+    name: "Kalpesh"
+    email: "your.email@gmail.com"
+    phone: "+91-XXXXXXXXXX"
+  
+  # Browser configuration
+  browser:
+    headless: false                # false = headed mode for debugging, true = headless
+  
+  # MCP (Model Context Protocol) configuration
+  mcp:
+    enabled: false                 # Enable/disable MCP integration
+    config_path: ".kiro/settings/mcp.json"  # Path to MCP configuration file
+  
+  # Homepage navigation settings
+  homepage_navigation:
+    enabled: true                  # Enable automatic navigation from homepage to careers page
+    max_attempts: 3                # Maximum attempts to find careers link
+    career_keywords:               # Keywords to identify careers links
+      - "career"
+      - "careers"
+      - "jobs"
+      - "opportunities"
+      - "join"
+      - "work with us"
+  
+  # Career page validation settings
+  validation:
+    enabled: true
+    keyword_threshold: 2           # Minimum career keywords required
+    timeout_seconds: 30
+    verify_company_name: true
+  
+  # FSM orchestrator settings
+  fsm:
+    max_iterations: 20             # Maximum FSM loop iterations
+    page_load_timeout: 30          # Page load timeout in seconds
+  
+  # Rate limiting (provider-specific)
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 15        # Gemini free tier
+    requests_per_day: 1500         # Gemini free tier
+  
+  # Retry logic for failed requests
+  retry:
+    max_retries: 3
+    backoff_multiplier: 2.0
+    initial_delay_seconds: 1.0
+    max_delay_seconds: 30.0
+  
+  # Logging configuration
+  logging:
+    log_ai_decisions: true
+    log_dom_interactions: true
+    log_api_usage: true
+  
+  # Screenshot configuration
+  screenshots:
+    enabled: true                  # Enable/disable screenshot capture
+    directory: "logs/screenshots"  # Directory to store screenshots
+    on_failure: true               # Capture screenshot when application fails
+    on_unexpected_structure: true  # Capture screenshot on unexpected page structure
+    each_iteration: false          # Capture screenshot at each FSM iteration (can generate many files)
+    retention_days: 30             # Delete screenshots older than this many days
+  
+  # Network monitoring configuration
+  network_monitoring:
+    enabled: true                  # Enable/disable network request monitoring
+    track_xhr_fetch: true          # Track XHR and Fetch requests
+    detect_form_submission: true   # Detect and validate form submissions
+  
+  # Provider-specific configuration (optional)
+  ollama_base_url: "http://localhost:11434"  # For Ollama local models

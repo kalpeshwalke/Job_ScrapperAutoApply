@@ -1,0 +1,53 @@
+# Test config without auto_apply section for backward compatibility testing
+
+# --- User Profile ---
+profile:
+  role: "QA Engineer"
+  experience_years: 3
+  skills:
+    - "Manual Testing"
+    - "Selenium"
+    - "Playwright"
+    - "API Testing"
+    - "Postman"
+
+# --- Search Parameters ---
+search:
+  keywords:
+    - "QA Engineer"
+  locations:
+    - "Pune"
+  experience_range:
+    min: 2
+    max: 5
+  date_posted_days: 7
+  only_new_since_last_run: true
+
+# --- Platform Toggles ---
+platforms:
+  naukri:
+    enabled: false
+  linkedin:
+    enabled: true
+  indeed:
+    enabled: true
+  foundit:
+    enabled: true
+
+# --- Browser & Anti-Bot ---
+browser:
+  headless: false
+  chrome_version_main: 146
+  random_delay:
+    min_seconds: 10
+    max_seconds: 20
+  page_load_timeout: 30
+  scroll_pause_seconds: 3
+  max_scrolls: 10
+
+# --- Output ---
+output:
+  master_file_name: "qa_jobs_master.xlsx"
+  description_preview_chars: 300
+  include_full_description: true
+  find_company_career_pages: true

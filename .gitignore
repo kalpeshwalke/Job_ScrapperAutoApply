@@ -1,0 +1,33 @@
+# Environments & Credentials
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Project Data & Output (Ignored to protect privacy)
+data/cookies/
+data/output/
+data/cache/
+data/profiles/
+logs/
+*.xlsx
+*.tmp
+*.db
+*.log
+Job_Tracking.xlsx
+!Job_Tracking_Template.xlsx
+
+# Python built-ins
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
