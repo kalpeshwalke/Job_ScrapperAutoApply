@@ -606,8 +606,11 @@ class FSMOrchestratorV2:
                         session.resume_uploaded = True
                         session.record_field_filled(label, value)
                         logger.info("Resume uploaded: %s", value)
+                        _fname = str(value).split('/')[-1] if '/' in str(value) else str(value).split('\\')[-1]
+                        print(f"   📄 [Upload] Attached resume: {_fname}")
                     except Exception as e:
                         logger.warning("Resume upload failed: %s", e)
+                        print(f"   ❌ [Upload Error] Failed to attach resume")
                     continue
 
                 # ---- High-confidence deterministic fill ----
@@ -616,8 +619,10 @@ class FSMOrchestratorV2:
                         dom.fill_by_ref(ref, value)
                         session.record_field_filled(label, value)
                         logger.info("Filled [%d] '%s' = '%s'", ref, label[:30], str(value)[:30])
+                        print(f"   ▶️ [Fill] {label[:40]} = '{str(value)[:40]}'")
                     except Exception as e:
                         logger.warning("Fill failed [%d] '%s': %s", ref, label[:30], e)
+                        print(f"   ❌ [Fill Error] Failed on '{label[:40]}'")
                         session.record_field_skipped(label)
 
                 # ---- Needs AI ----
@@ -642,8 +647,10 @@ class FSMOrchestratorV2:
                                     "AI free-text [%d] '%s' -> '%s'",
                                     ref, label[:30], ai_answer[:30],
                                 )
+                                print(f"   🤖 [AI Generate] {label[:40]} = '{str(ai_answer)[:40]}...'")
                             except Exception as e:
                                 logger.warning("AI free-text fill failed: %s", e)
+                                print(f"   ❌ [AI Generate Error] Failed on '{label[:40]}'")
                                 session.record_field_skipped(label)
                         else:
                             session.record_field_skipped(label)
@@ -667,8 +674,10 @@ class FSMOrchestratorV2:
                                         "AI filled [%d] '%s' = '%s'",
                                         ref, label[:30], fill_value[:30],
                                     )
+                                    print(f"   🤖 [AI Suggest] {label[:40]} = '{str(fill_value)[:40]}'")
                                 except Exception as e:
                                     logger.warning("AI fill failed: %s", e)
+                                    print(f"   ❌ [AI Suggest Error] Failed on '{label[:40]}'")
                                     session.record_field_skipped(label)
                             else:
                                 session.record_field_skipped(label)
@@ -705,6 +714,7 @@ class FSMOrchestratorV2:
                         obs = self.observer.observe(self.page, before)
                         if obs.result_type != ResultType.NOOP:
                             logger.info("Moved to next form page")
+                            print("   ⏭️ [Navigation] Clicked Next/Continue to open next form page")
                             found_next = True
                         # else: click was a noop, stop
                     # else: this is the final Submit button, stop looping
