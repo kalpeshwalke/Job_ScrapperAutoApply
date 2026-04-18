@@ -47,7 +47,10 @@ CAREERS_SELECTORS = [
     'a:text-matches("^Opportunities$", "i")',
     # Broader text matches (lower confidence)
     'a:text-matches("careers|career", "i")',
-    'a:text-matches("jobs|job openings", "i")',
+    'button:text-matches("careers|career", "i")',
+    'a:text-matches("jobs|job openings|search jobs|explore all jobs|explore jobs|view jobs", "i")',
+    'button:text-matches("jobs|job openings|search jobs|explore all jobs|explore jobs|view jobs", "i")',
+    '[role="button"]:text-matches("explore|search jobs|view all", "i")',
     'a:text-matches("hiring|we.*hiring", "i")',
 ]
 

@@ -472,6 +472,24 @@ class FSMOrchestratorV2:
         except Exception as e:
             logger.warning("FIND_JOB state error: %s", e)
 
+        # FALLBACK: If we didn't find the job, maybe we are on a generic splash page.
+        # See if there's a "Search Jobs" or "Explore All Jobs" button.
+        logger.info("Specific job not found. Checking for generic 'Explore Jobs' button...")
+        fallback_result = rule_engine.find_careers_link(failed_refs=session.failed_refs)
+        if fallback_result["confidence"] == "high" and fallback_result.get("locator"):
+            before_fb = self.observer.snapshot(self.page)
+            try:
+                print("   [>>] [Navigation] Clicking generic 'Explore/Search Jobs' button first")
+                fallback_result["locator"].click(timeout=5000)
+                time.sleep(3)
+                obs_fb = self.observer.observe(self.page, before_fb)
+                if obs_fb.result_type != ResultType.NOOP:
+                    session.update_url(self.page.url)
+                    logger.info("Navigated to internal job board. Proceeding.")
+                    return True
+            except Exception as e:
+                logger.warning("Explore jobs click failed: %s", e)
+
         logger.info("Could not find specific job listing, proceeding with current page")
         return True  # Best-effort; proceed to CLICK_APPLY anyway
 
