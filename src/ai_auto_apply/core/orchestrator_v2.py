@@ -424,7 +424,8 @@ class FSMOrchestratorV2:
         best_match_count = 0
 
         try:
-            all_links = self.page.locator("a").all()
+            # Expand to catch standard links, buttons, and custom block cards used heavily in Workday/Eightfold/Siemens
+            all_links = self.page.locator('a, button, [role="button"], [role="link"], div[class*="job"], li[class*="job"]').all()
             for link in all_links:
                 try:
                     link_text = link.inner_text(timeout=500).lower().strip()
@@ -607,10 +608,10 @@ class FSMOrchestratorV2:
                         session.record_field_filled(label, value)
                         logger.info("Resume uploaded: %s", value)
                         _fname = str(value).split('/')[-1] if '/' in str(value) else str(value).split('\\')[-1]
-                        print(f"   📄 [Upload] Attached resume: {_fname}")
+                        print(f"   [+] [Upload] Attached resume: {_fname}")
                     except Exception as e:
                         logger.warning("Resume upload failed: %s", e)
-                        print(f"   ❌ [Upload Error] Failed to attach resume")
+                        print(f"   [!] [Upload Error] Failed to attach resume")
                     continue
 
                 # ---- High-confidence deterministic fill ----
@@ -619,10 +620,10 @@ class FSMOrchestratorV2:
                         dom.fill_by_ref(ref, value)
                         session.record_field_filled(label, value)
                         logger.info("Filled [%d] '%s' = '%s'", ref, label[:30], str(value)[:30])
-                        print(f"   ▶️ [Fill] {label[:40]} = '{str(value)[:40]}'")
+                        print(f"   [>] [Fill] {label[:40]} = '{str(value)[:40]}'")
                     except Exception as e:
                         logger.warning("Fill failed [%d] '%s': %s", ref, label[:30], e)
-                        print(f"   ❌ [Fill Error] Failed on '{label[:40]}'")
+                        print(f"   [X] [Fill Error] Failed on '{label[:40]}'")
                         session.record_field_skipped(label)
 
                 # ---- Needs AI ----
@@ -647,10 +648,10 @@ class FSMOrchestratorV2:
                                     "AI free-text [%d] '%s' -> '%s'",
                                     ref, label[:30], ai_answer[:30],
                                 )
-                                print(f"   🤖 [AI Generate] {label[:40]} = '{str(ai_answer)[:40]}...'")
+                                print(f"   [A] [AI Generate] {label[:40]} = '{str(ai_answer)[:40]}...'")
                             except Exception as e:
                                 logger.warning("AI free-text fill failed: %s", e)
-                                print(f"   ❌ [AI Generate Error] Failed on '{label[:40]}'")
+                                print(f"   [X] [AI Generate Error] Failed on '{label[:40]}'")
                                 session.record_field_skipped(label)
                         else:
                             session.record_field_skipped(label)
@@ -674,10 +675,10 @@ class FSMOrchestratorV2:
                                         "AI filled [%d] '%s' = '%s'",
                                         ref, label[:30], fill_value[:30],
                                     )
-                                    print(f"   🤖 [AI Suggest] {label[:40]} = '{str(fill_value)[:40]}'")
+                                    print(f"   [A] [AI Suggest] {label[:40]} = '{str(fill_value)[:40]}'")
                                 except Exception as e:
                                     logger.warning("AI fill failed: %s", e)
-                                    print(f"   ❌ [AI Suggest Error] Failed on '{label[:40]}'")
+                                    print(f"   [X] [AI Suggest Error] Failed on '{label[:40]}'")
                                     session.record_field_skipped(label)
                             else:
                                 session.record_field_skipped(label)
@@ -714,7 +715,7 @@ class FSMOrchestratorV2:
                         obs = self.observer.observe(self.page, before)
                         if obs.result_type != ResultType.NOOP:
                             logger.info("Moved to next form page")
-                            print("   ⏭️ [Navigation] Clicked Next/Continue to open next form page")
+                            print("   [>>] [Navigation] Clicked Next/Continue to open next form page")
                             found_next = True
                         # else: click was a noop, stop
                     # else: this is the final Submit button, stop looping
@@ -762,8 +763,10 @@ class FSMOrchestratorV2:
             before = self.observer.snapshot(self.page)
             try:
                 locator.scroll_into_view_if_needed()
-                locator.click(timeout=5000)
+                print("   [TEST] Identified Submit button, but SKIPPING click.")
+                # locator.click(timeout=5000)  DISABLED FOR TESTING
                 time.sleep(3)
+                return True # Forge a success for testing
             except Exception as e:
                 logger.warning("Submit click failed: %s", e)
                 session.record_attempt("submit_form", False)

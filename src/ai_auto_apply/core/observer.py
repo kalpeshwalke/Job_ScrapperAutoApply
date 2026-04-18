@@ -298,16 +298,12 @@ class ActionObserver:
                     
                     return {
                         captcha: (
-                            html.includes('recaptcha') ||
                             html.includes('hcaptcha') ||
                             body.includes('verify you are human') ||
                             body.includes('i am not a robot') ||
-                            html.includes('cloudflare')
+                            body.includes('please confirm you are human')
                         ),
                         login_wall: (
-                            body.includes('sign in to continue') ||
-                            body.includes('log in to apply') ||
-                            body.includes('create an account') ||
                             (document.querySelectorAll('input[type="password"]').length > 0 &&
                              !body.includes('application'))
                         ),
