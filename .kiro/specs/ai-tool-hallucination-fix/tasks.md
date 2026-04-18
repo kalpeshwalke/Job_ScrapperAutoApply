@@ -1,0 +1,163 @@
+# Implementation Plan
+
+- [x] 1. Write bug condition exploration test
+  - **Property 1: Bug Condition** - AI Tool Hallucination Detection
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate the bug exists
+  - **Scoped PBT Approach**: For deterministic bugs, scope the property to the concrete failing case(s) to ensure reproducibility
+  - Test that when AI generates hallucinated tool names (`apply_for_job`, `custom_search_engine`, `generate_job_ad_template`, `apply_job_description`, `custom_interview_preparation_tool`, `search_interview_questions`), the system rejects them with HALLUCINATION_ERROR
+  - Test that system returns `{"success": False, "error_type": "HALLUCINATION_ERROR", "error": "Invalid tool '...'"}` for hallucinated tools
+  - Test that error message includes list of valid tools: `click_element`, `enter_text`, `select_option`, `upload_file`, `press_key`, `navigate`
+  - The test assertions should match the Expected Behavior Properties from design (Property 1: Bug Condition - Tool Name Validation)
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists)
+  - Document counterexamples found to understand root cause (e.g., "hallucinated tool 'apply_for_job' was not validated and attempted execution")
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 2.2, 2.3_
+
+- [x] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Valid Tool Execution Unchanged
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for valid tool calls (`click_element`, `enter_text`, `select_option`, `upload_file`, `press_key`, `navigate`)
+  - Observe that valid tool calls execute successfully and return success results
+  - Observe that DOM analysis, Ollama integration, logging, and MCP/legacy modes continue to work
+  - Write property-based tests capturing observed behavior patterns from Preservation Requirements
+  - Property-based testing generates many test cases for stronger guarantees
+  - Test that for all valid tool names in ALLOWED_TOOLS, execution succeeds as before
+  - Test that error handling for recoverable errors (timeouts, missing elements) remains unchanged
+  - Test that logging captures all tool calls correctly
+  - Test that MCP and legacy execution modes both continue to function
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
+
+- [ ] 3. Fix for AI tool hallucination
+
+  - [x] 3.1 Add ALLOWED_TOOLS constant and validation to BrowserAgent
+    - Add `ALLOWED_TOOLS` class-level constant in `src/ai_auto_apply/agents/browser_agent.py` with the six valid tool names: `click_element`, `enter_text`, `select_option`, `upload_file`, `press_key`, `navigate`
+    - Implement `validate_tool_call(tool_call)` method that checks if tool name is in ALLOWED_TOOLS
+    - Method should return `(is_valid: bool, error_message: Optional[str])`
+    - If tool name not in ALLOWED_TOOLS, return `(False, "Invalid tool '{name}'. Allowed tools: {list}")`
+    - If tool name is valid, return `(True, None)`
+    - _Bug_Condition: isBugCondition(tool_call) where tool_call["name"] NOT IN ALLOWED_TOOLS_
+    - _Expected_Behavior: System rejects hallucinated tool names and returns HALLUCINATION_ERROR with correction message_
+    - _Preservation: Valid tool execution must remain unchanged_
+    - _Requirements: 2.2, 2.3_
+
+  - [x] 3.2 Update _execute_step_legacy() to validate tool names before execution
+    - Modify `_execute_step_legacy()` in `src/ai_auto_apply/agents/browser_agent.py` to call `validate_tool_call()` before attempting execution
+    - If validation fails, return result dict with `{"success": False, "error": error_msg, "error_type": "HALLUCINATION_ERROR", "tool_name": tool_call.get("name")}`
+    - Log hallucination detection with `logger.error(f"Tool hallucination detected: {error_msg}")`
+    - If validation succeeds, proceed with normal tool execution
+    - _Bug_Condition: isBugCondition(tool_call) where tool_call["name"] NOT IN ALLOWED_TOOLS_
+    - _Expected_Behavior: System rejects hallucinated tool names before execution attempt_
+    - _Preservation: Valid tool execution flow must remain unchanged_
+    - _Requirements: 2.2, 2.3_
+
+  - [x] 3.3 Strengthen BrowserAgent SYSTEM_PROMPT with explicit tool list and warnings
+    - Update `SYSTEM_PROMPT` in `src/ai_auto_apply/agents/browser_agent.py` to explicitly list the 6 available tools at the beginning
+    - Add section: "AVAILABLE TOOLS (USE ONLY THESE):" with numbered list of all 6 tools and their signatures
+    - Add "CRITICAL RULES:" section with warnings: "NEVER invent tool names. Only use the 6 tools listed above."
+    - Add warning: "If you cannot complete a step with these tools, report that you cannot complete it."
+    - Add warning: "Do NOT create tools like 'apply_for_job', 'search_jobs', 'custom_search_engine', etc."
+    - _Bug_Condition: AI model ignores tool definitions and invents tool names_
+    - _Expected_Behavior: AI model receives explicit tool list and warnings at prompt start_
+    - _Preservation: Existing prompt content and structure must remain_
+    - _Requirements: 2.5_
+
+  - [x] 3.4 Update PlannerAgent SYSTEM_PROMPT_BASE with Browser Agent tools summary
+    - Update `SYSTEM_PROMPT_BASE` in `src/ai_auto_apply/agents/planner_agent.py` to include "BROWSER AGENT TOOLS AVAILABLE:" section
+    - List all 6 Browser Agent tools with brief descriptions: `click_element(mmid)`, `enter_text(mmid, text)`, `select_option(mmid, value)`, `upload_file(mmid, file_path)`, `press_key(key)`, `navigate(url)`
+    - Add note: "When planning steps, ensure each step can be executed using these tools."
+    - Add "HALLUCINATION WARNING:" section with explicit warnings against inventing tool names
+    - Add warning: "Do NOT invent tool names that don't exist"
+    - Add warning: "Do NOT assume tools like 'apply_for_job', 'search_jobs', 'autofill_form' exist"
+    - _Bug_Condition: Planner Agent plans steps without knowing Browser Agent's tool constraints_
+    - _Expected_Behavior: Planner Agent knows available tools and plans accordingly_
+    - _Preservation: Existing planning logic and prompt structure must remain_
+    - _Requirements: 2.5_
+
+  - [x] 3.5 Add hallucination detection and correction messages to orchestrator
+    - Initialize `hallucination_count = 0` at the start of the execution loop in `src/ai_auto_apply/core/orchestrator.py`
+    - After `browser_agent.execute_step()`, check if `result.get("error_type") == "HALLUCINATION_ERROR"`
+    - If hallucination detected, increment `hallucination_count` and log warning with count
+    - Create correction message: "ERROR: You used an invalid tool name '{tool_name}'. Valid tools are: click_element, enter_text, select_option, upload_file, press_key, navigate. Please retry using ONLY these tools."
+    - Append correction message to context for next AI iteration (add to `context_messages` or equivalent)
+    - If no hallucination detected, reset `hallucination_count = 0`
+    - _Bug_Condition: AI hallucinates tool names and receives no corrective feedback_
+    - _Expected_Behavior: System provides clear error feedback to AI with valid tool list_
+    - _Preservation: Existing orchestrator flow and error handling must remain_
+    - _Requirements: 2.3_
+
+  - [x] 3.6 Implement fail-fast termination after repeated hallucinations
+    - After updating `hallucination_count` in orchestrator, check if `hallucination_count >= 3`
+    - If threshold reached, log error: "Fail-fast: 3 consecutive hallucinations detected. Terminating."
+    - Return failure result: `{"status": "failed", "reason": "AI model repeatedly hallucinating tool names. Consider using a better model.", "iterations": iteration, "hallucination_count": hallucination_count}`
+    - Ensure this check happens before continuing to next iteration
+    - _Bug_Condition: System continues indefinitely when AI repeatedly hallucinates_
+    - _Expected_Behavior: System terminates after 3 consecutive hallucinations to prevent infinite loops_
+    - _Preservation: Normal iteration flow for valid tool calls must remain_
+    - _Requirements: 2.6_
+
+  - [x] 3.7 Add HALLUCINATION error type to browser_errors.py
+    - Add `HALLUCINATION = "hallucination"` to `ErrorType` enum in `src/ai_auto_apply/config/browser_errors.py`
+    - Add docstring: "# NEW: AI invented non-existent tool"
+    - Create `HallucinationError` exception class inheriting from `BrowserError`
+    - Constructor should accept `tool_name: str` and `allowed_tools: set`
+    - Generate message: `f"AI hallucinated tool '{tool_name}'. Allowed: {', '.join(sorted(allowed_tools))}"`
+    - Call `super().__init__(message, ErrorType.HALLUCINATION)`
+    - Store `self.tool_name` and `self.allowed_tools` as instance attributes
+    - _Bug_Condition: No dedicated error type for hallucination tracking_
+    - _Expected_Behavior: System has proper error classification for hallucinations_
+    - _Preservation: Existing error types and error handling must remain_
+    - _Requirements: 2.2, 2.3_
+
+  - [x] 3.8 Create comprehensive unit tests for hallucination fix
+    - Create new test file `tests/test_hallucination_fix.py`
+    - Test `validate_tool_call()` with valid tool names (should return `(True, None)`)
+    - Test `validate_tool_call()` with invalid tool names (should return `(False, error_message)`)
+    - Test `_execute_step_legacy()` with hallucinated tool names (should return HALLUCINATION_ERROR)
+    - Test `_execute_step_legacy()` with valid tool names (should execute successfully)
+    - Test that SYSTEM_PROMPT includes tool list and warnings
+    - Test that SYSTEM_PROMPT_BASE includes Browser Agent tools summary
+    - Mock AI responses to test hallucination detection in orchestrator
+    - Test fail-fast logic terminates after 3 consecutive hallucinations
+    - Test correction messages are injected into AI context after hallucinations
+    - _Bug_Condition: No tests exist to validate hallucination prevention_
+    - _Expected_Behavior: Comprehensive test coverage for all hallucination scenarios_
+    - _Preservation: Existing test suite must continue to pass_
+    - _Requirements: 2.2, 2.3, 2.5, 2.6_
+
+  - [x] 3.9 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - AI Tool Hallucination Detection
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - Verify that hallucinated tool names are now rejected with HALLUCINATION_ERROR
+    - Verify that error messages include list of valid tools
+    - _Requirements: 2.2, 2.3_
+
+  - [x] 3.10 Verify preservation tests still pass
+    - **Property 2: Preservation** - Valid Tool Execution Unchanged
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Confirm all valid tool calls still execute successfully
+    - Confirm DOM analysis, Ollama integration, logging, and MCP/legacy modes still work
+    - Confirm error handling for recoverable errors remains unchanged
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
+
+- [x] 4. Checkpoint - Ensure all tests pass
+  - Run full test suite including new hallucination tests
+  - Run preservation tests to confirm no regressions
+  - Run bug condition test to confirm fix works
+  - Verify all unit tests pass
+  - Verify all integration tests pass
+  - If any tests fail, investigate and fix before proceeding
+  - Consider manual testing with Gururo company to verify real-world effectiveness
+  - Ensure all tests pass, ask the user if questions arise

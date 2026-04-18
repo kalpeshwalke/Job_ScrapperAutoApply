@@ -1,0 +1,4 @@
+# file: D:\KALPESH\UDEMY\STOCK TRADING\PROJECT Trading\Job scrapper\src\ai_auto_apply\tools\homepage_navigator.py
+# hypothesis_version: 6.151.10
+
+[1.5, 2.0, 10000, 30000, '#', '.', '/', 'Top 3 candidates:', 'a[href]', 'apply', 'auto_apply', 'career', 'career_keywords', 'careers', 'employment', 'enabled', 'facebook.com', 'fb.com', 'footer', 'h1, h2, h3, h4', 'header', 'hiring', 'homepage_navigation', 'homepage_navigator', 'href', 'in_navigation', 'instagram.com', 'is_same_domain', 'job', 'jobs', 'join our team', 'join us', 'link', 'linkedin.com', 'locator', 'matched_keywords', 'max_attempts', 'nav', 'networkidle', 'opening', 'openings', 'opportunities', 'pinterest.com', 'position', 'positions', 'reddit.com', 'score', 'snapchat.com', 'telegram.org', 'text', 'tiktok.com', 'twitter.com', 'vacancies', 'whatsapp.com', 'work with us', 'x.com', 'xpath=..', 'youtube.com']

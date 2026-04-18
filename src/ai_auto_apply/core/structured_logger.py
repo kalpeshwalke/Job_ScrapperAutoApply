@@ -375,39 +375,6 @@ class StructuredLogger:
             outcome,
             json.dumps(structured_data, default=str)
         )
-    
-    def log_wait_operation(self, wait_type: str, duration_ms: int, 
-                          outcome: str, context: Optional[Dict[str, Any]] = None):
-        """
-        Log wait operation event.
-        
-        Args:
-            wait_type: Type of wait operation (e.g., "page_ready", "element", "loading_indicator", "adaptive")
-            duration_ms: Duration of wait in milliseconds
-            outcome: Outcome of wait operation (e.g., "success", "timeout", "not_found")
-            context: Additional context (selector, element_count, etc.)
-        
-        Requirements: 15.6
-        """
-        if not self._log_ai_decisions:
-            return
-        
-        structured_data = {
-            "timestamp": datetime.now().isoformat(),
-            "component": self.component_name,
-            "wait_type": wait_type,
-            "duration_ms": duration_ms,
-            "outcome": outcome,
-            "context": context or {}
-        }
-        
-        self.logger.info(
-            "Wait Operation: %s (%dms) -> %s - %s",
-            wait_type,
-            duration_ms,
-            outcome,
-            json.dumps(structured_data, default=str)
-        )
 
     def log_mcp_operation(self, tool_name: str, arguments: Dict[str, Any], 
                          result: Any, duration_ms: float, success: bool, 

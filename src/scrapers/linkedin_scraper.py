@@ -540,12 +540,63 @@ class LinkedInScraper(BaseScraper):
     # ------------------------------------------------------------------
     def _build_search_url(self, keyword: str, location: str) -> str:
         """Build LinkedIn job search URL with filters."""
+        # Map experience range to LinkedIn experience level codes
+        # LinkedIn f_E codes: 1=Internship, 2=Entry, 3=Associate, 4=Mid-Senior, 5=Director, 6=Executive
+        experience_levels = self._map_experience_to_linkedin_levels()
+        
         params = {
             "keywords": keyword,
             "location": location,
             "f_TPR": f"r{self.config.date_posted_days * 86400}",  # Time period in seconds
-            "f_E": "3",  # Mid-senior level (~3 years exp)
             "sortBy": "R",  # Relevance
         }
+        
+        # Add experience level filter if mapped
+        if experience_levels:
+            params["f_E"] = ",".join(experience_levels)
+        
         base = "https://www.linkedin.com/jobs/search/"
         return f"{base}?{urllib.parse.urlencode(params)}"
+    
+    def _map_experience_to_linkedin_levels(self) -> list:
+        """
+        Map config experience_range to LinkedIn experience level codes.
+        
+        LinkedIn codes:
+        - 1: Internship (0 years)
+        - 2: Entry level (0-2 years)
+        - 3: Associate (2-5 years)
+        - 4: Mid-Senior level (5-10 years)
+        - 5: Director (10+ years)
+        - 6: Executive (15+ years)
+        """
+        min_exp = self.config.experience_range.get('min', 0)
+        max_exp = self.config.experience_range.get('max', 10)
+        
+        levels = []
+        
+        # Internship (0 years)
+        if min_exp == 0:
+            levels.append("1")
+        
+        # Entry level (0-2 years)
+        if min_exp <= 2:
+            levels.append("2")
+        
+        # Associate (2-5 years)
+        if min_exp <= 5 and max_exp >= 2:
+            levels.append("3")
+        
+        # Mid-Senior (5-10 years)
+        if min_exp <= 10 and max_exp >= 5:
+            levels.append("4")
+        
+        # Director (10+ years)
+        if max_exp >= 10:
+            levels.append("5")
+        
+        # Executive (15+ years)
+        if max_exp >= 15:
+            levels.append("6")
+        
+        return levels

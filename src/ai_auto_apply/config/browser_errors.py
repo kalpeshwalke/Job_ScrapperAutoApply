@@ -14,6 +14,7 @@ class ErrorType(Enum):
     PERMANENT = "permanent"          # No point retrying (missing elements, broken pages)
     RATE_LIMIT = "rate_limit"        # Wait and retry (API rate limits)
     CAPTCHA = "captcha"              # Manual intervention needed (bot detection)
+    HALLUCINATION = "hallucination"  # NEW: AI invented non-existent tool
 
 
 class BrowserError(Exception):
@@ -39,6 +40,24 @@ class BrowserError(Exception):
     
     def __str__(self):
         return f"[{self.error_type.value}] {self.message}"
+
+
+class HallucinationError(BrowserError):
+    """
+    Exception for AI tool hallucination.
+    
+    Raised when the AI model generates a tool call with an invalid tool name.
+    
+    Attributes:
+        tool_name: The hallucinated tool name
+        allowed_tools: Set of valid tool names
+    """
+    
+    def __init__(self, tool_name: str, allowed_tools: set):
+        message = f"AI hallucinated tool '{tool_name}'. Allowed: {', '.join(sorted(allowed_tools))}"
+        super().__init__(message, ErrorType.HALLUCINATION)
+        self.tool_name = tool_name
+        self.allowed_tools = allowed_tools
 
 
 def classify_error(exception: Exception) -> BrowserError:

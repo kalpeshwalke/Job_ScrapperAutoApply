@@ -13,8 +13,8 @@ echo   Job Scraper - Starting...
 echo  ============================================
 echo.
 
-REM --- Change to script directory ---
-cd /d "%~dp0"
+REM --- Change to project root directory ---
+cd /d "%~dp0.."
 
 REM --- Check Python is available ---
 python --version >nul 2>&1
@@ -41,6 +41,19 @@ if %ERRORLEVEL% NEQ 0 (
     echo  [OK] Dependencies installed.
     echo.
 )
+
+REM --- Check Ollama is running (for auto-apply) ---
+echo  [CHECK] Verifying Ollama status...
+curl -s http://localhost:11434/api/tags >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo  [INFO] Ollama not running. Starting Ollama...
+    start "" "ollama" serve
+    timeout /t 3 /nobreak >nul
+    echo  [OK] Ollama started.
+) else (
+    echo  [OK] Ollama is already running.
+)
+echo.
 
 REM --- Run the scraper ---
 echo  [START] Running job scraper...

@@ -75,7 +75,23 @@ IMPORTANT NAVIGATION STRATEGIES:
 5. **Different Page Structures**: Adapt to any career page layout - some have job boards, some have direct forms
 6. **Role Selection**: If there are multiple roles listed, click on the one matching the job title
 
-BE ADAPTIVE: Every career page is different. Use the DOM elements to understand the page structure and navigate intelligently. Don't fail just because the page doesn't have a form immediately - it might be a job listings page that needs navigation first."""
+BE ADAPTIVE: Every career page is different. Use the DOM elements to understand the page structure and navigate intelligently. Don't fail just because the page doesn't have a form immediately - it might be a job listings page that needs navigation first.
+
+BROWSER AGENT TOOLS AVAILABLE:
+The Browser Agent can execute these 6 tools to interact with web pages:
+- click_element(mmid): Click buttons, links, and other interactive elements
+- enter_text(mmid, text): Fill input fields with text
+- select_option(mmid, value): Select options from dropdown menus
+- upload_file(mmid, file_path): Upload files (e.g., resume, cover letter)
+- press_key(key): Press keyboard keys (e.g., Enter, Tab)
+- navigate(url): Navigate to a specific URL
+
+When planning steps, ensure each step can be executed using these tools.
+
+HALLUCINATION WARNING:
+- Do NOT invent tool names that don't exist
+- Do NOT assume tools like 'apply_for_job', 'search_jobs', 'autofill_form' exist
+- Only reference the 6 Browser Agent tools listed above"""
     
     MCP_TOOLS_DESCRIPTION = """
 
@@ -117,6 +133,449 @@ Use these tools to query page state and make informed decisions."""
             prompt += self.MCP_TOOLS_DESCRIPTION
         return prompt
     
+    # ----------------------------------------------------------------
+    # Accessibility Tree-based navigation (industry-standard approach)
+    # ----------------------------------------------------------------
+    
+    def find_careers_link_from_ax_tree(
+        self, 
+        ax_snapshot: str, 
+        current_url: str, 
+        company: str = ""
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find the careers/jobs link from an accessibility tree snapshot.
+        
+        This is the primary navigation method, replacing the old regex-based
+        analyze_page_with_ai(). It sends the compact AX tree (~500-2000 chars)
+        to the AI instead of extracting links from raw HTML (~1.3M chars).
+        
+        Token usage: ~700 tokens (vs ~5000 for old approach)
+        
+        Args:
+            ax_snapshot: Formatted accessibility tree text with [N] references
+            current_url: Current page URL
+            company: Company name for context
+            
+        Returns:
+            Dict with action instructions:
+            {"action": "click_ref", "ref": 3, "reasoning": "..."}
+            {"action": "navigate_url", "url": "https://...", "reasoning": "..."}
+            {"action": "click_text", "text": "Careers", "reasoning": "..."}
+            Or None if no careers link found.
+        """
+        prompt = f"""You are navigating {company}'s website to find their careers/jobs page.
+
+Current URL: {current_url}
+
+Below is the accessibility tree of the current page. Interactive elements are marked with [N] numbers.
+
+{ax_snapshot}
+
+TASK: Find the link that leads to the careers, jobs, or "join us" page.
+
+RULES:
+1. Look for links labeled "Careers", "Jobs", "Join Us", "Work With Us", "Openings" etc.
+2. Navigation bar and footer links are most reliable
+3. IGNORE product pages, courses, blog posts, pricing pages
+4. If you see a direct careers URL, prefer navigate_url action
+
+Respond with JSON:
+{{
+    "action": "click_ref" | "navigate_url" | "click_text" | "not_found",
+    "ref": <element number if click_ref>,
+    "url": "<URL if navigate_url>",
+    "text": "<link text if click_text>",
+    "reasoning": "Why this is the careers link"
+}}"""
+
+        try:
+            response = self.provider.generate_planner_response(
+                prompt=prompt,
+                context={}
+            )
+            
+            # Log token usage
+            if response.usage:
+                tokens = response.usage.get("total_tokens", 0)
+                logger.info(f"AX tree navigation: {tokens} tokens used")
+                self.structured_logger.log_api_usage(
+                    provider=self.provider.get_provider_name(),
+                    model=self.provider.model,
+                    endpoint="find_careers_link_ax_tree",
+                    tokens_used=tokens
+                )
+            
+            # Parse response
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            import json
+            result = json.loads(content)
+            
+            action = result.get("action", "not_found")
+            if action == "not_found":
+                logger.warning(f"AI found no careers link. Reasoning: {result.get('reasoning', 'N/A')}")
+                return None
+            
+            # Ensure ref is an int if present
+            if "ref" in result and result["ref"] is not None:
+                result["ref"] = int(result["ref"])
+            
+            logger.info(f"AI navigation decision: {action} - {result.get('reasoning', 'N/A')}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"AX tree navigation failed: {e}", exc_info=True)
+            return None
+    
+    def find_popup_dismiss_action(
+        self, 
+        ax_snapshot: str, 
+        current_url: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find the action to dismiss a cookie banner or modal popup.
+        
+        Args:
+            ax_snapshot: Formatted accessibility tree text with [N] references
+            current_url: Current page URL
+            
+        Returns:
+            Dict with action instructions:
+            {"action": "click_ref", "ref": 3, "reasoning": "..."}
+            Or None if no obvious popup/cookie banner exists.
+        """
+        prompt = f"""You are analyzing a web page which might have a cookie consent banner, newsletter popup, or overlay modal that blocks the UI.
+
+Current URL: {current_url}
+
+Below is the accessibility tree of the page. Interactive elements are marked with [N] numbers.
+
+{ax_snapshot}
+
+TASK: Find the button or link that will dismiss any intrusive popups.
+
+RULES:
+1. Look for cookie consent options: "Accept All Cookies", "Accept", "Reject All", "Decline", "Got it", "Allow All". PREFER rejecting if available, otherwise accept.
+2. Look for newsletter/modal dismissals: "Close", "X", "Dismiss", "No thanks", "Maybe later".
+3. ONLY return an action if you are highly confident it's a popup dismiss button. DO NOT return main navigation links or standard page buttons.
+4. If you don't confidently see a popup/cookie banner dismissal element, return "action": "not_found".
+
+Respond with JSON:
+{{
+    "action": "click_ref" | "not_found",
+    "ref": <element number to click if click_ref>,
+    "reasoning": "Why this is the correct dismiss button"
+}}"""
+
+        try:
+            response = self.provider.generate_planner_response(
+                prompt=prompt,
+                context={}
+            )
+            
+            # Parse response
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            import json
+            result = json.loads(content)
+            
+            action = result.get("action", "not_found")
+            if action == "not_found":
+                logger.debug(f"AI found no popup to dismiss. Reasoning: {result.get('reasoning', 'N/A')}")
+                return None
+            
+            # Ensure ref is an int if present
+            if "ref" in result and result["ref"] is not None:
+                result["ref"] = int(result["ref"])
+            
+            logger.info(f"AI popup dismiss decision: {action} - {result.get('reasoning', 'N/A')}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Popup dismiss detection failed: {e}", exc_info=True)
+            return None
+    
+    def analyze_page_with_ai(self, page_html: str, current_url: str) -> Dict[str, Any]:
+        """
+        Analyze page structure using AI to find careers links.
+        
+        OPTIMIZED APPROACH: Use Playwright locators to find career-related links,
+        then send only the link data (not HTML) to AI for selection.
+        
+        This reduces token usage by 99% compared to sending HTML.
+        
+        Args:
+            page_html: HTML content of the page (not used in optimized version)
+            current_url: Current page URL
+            
+        Returns:
+            Dictionary with page analysis:
+            {
+                "careers_links": List[Dict] - Links related to careers/jobs
+                "reasoning": str - AI's reasoning for selections
+            }
+        """
+        try:
+            # OPTIMIZATION: Use Playwright to find links directly instead of sending HTML to AI
+            from playwright.sync_api import sync_playwright
+            
+            # Get page from orchestrator (passed via context)
+            # For now, we'll extract links from HTML using regex as fallback
+            # In production, this should use the actual Playwright page object
+            
+            import re
+            
+            # Strategy 1: Find links with career-related keywords in text or href
+            # Removed generic 'work' and added 'work with us'
+            career_keywords = ['career', 'careers', 'job', 'jobs', 'hiring', 'join', 'work with us', 'opportunity', 'opportunities', 'talent', 'recruit', 'employ', 'opening', 'position']
+            penalty_keywords = ['product', 'course', 'mock test', 'interview', 'blog', 'article', 'pricing', 'support', 'login', 'register']
+            
+            careers_links = []
+            
+            # Extract all <a> tags with href
+            link_pattern = r'<a\s+(?:[^>]*?\s+)?href=["\'](.*?)["\'](?:[^>]*?)>(.*?)</a>'
+            matches = re.finditer(link_pattern, page_html, re.IGNORECASE | re.DOTALL)
+            
+            for match in matches:
+                href = match.group(1)
+                text = re.sub(r'<[^>]+>', '', match.group(2)).strip()  # Remove HTML tags from text
+                
+                # Check if link is career-related
+                text_lower = text.lower()
+                href_lower = href.lower()
+                
+                # Calculate relevance score
+                relevance_score = 0
+                matched_keywords = []
+                
+                # Strict word boundary matching for text to prevent false positives
+                for keyword in career_keywords:
+                    # Exact or word boundary match in text
+                    if re.search(r'\b' + re.escape(keyword) + r'\b', text_lower):
+                        relevance_score += 15
+                        matched_keywords.append(keyword)
+                    # For href, substring is okay but lower score
+                    if keyword in href_lower:
+                        relevance_score += 5
+                        if keyword not in matched_keywords:
+                            matched_keywords.append(keyword)
+                
+                # Exact match boost - massively increased to ensure they win over noisy product pages
+                if text_lower in ['careers', 'jobs', 'career', 'job openings', 'join us', 'join our team']:
+                    relevance_score += 80
+                    matched_keywords.append("exact_match_boost")
+                
+                # Penalize irrelevant links - massively increased to kill false positives
+                for penalty in penalty_keywords:
+                    if penalty in text_lower or penalty in href_lower:
+                        relevance_score -= 100
+                
+                # Only include links with positive relevance
+                if relevance_score > 0:
+                    # Determine confidence based on score
+                    if relevance_score >= 15:
+                        confidence = "high"
+                    elif relevance_score >= 8:
+                        confidence = "medium"
+                    else:
+                        confidence = "low"
+                    
+                    # Determine location (simplified)
+                    location = "body"
+                    if "nav" in page_html[max(0, match.start()-500):match.start()].lower():
+                        location = "nav"
+                    elif "footer" in page_html[max(0, match.start()-500):match.start()].lower():
+                        location = "footer"
+                    elif "header" in page_html[max(0, match.start()-500):match.start()].lower():
+                        location = "header"
+                    
+                    careers_links.append({
+                        "text": text[:100],  # Limit text length
+                        "href": href,
+                        "location": location,
+                        "confidence": confidence,
+                        "reasoning": f"Contains keywords: {', '.join(matched_keywords)}",
+                        "score": relevance_score
+                    })
+            
+            # Sort by relevance score (highest first)
+            careers_links.sort(key=lambda x: x.get("score", 0), reverse=True)
+            
+            # Limit to top 10 most relevant links
+            careers_links = careers_links[:10]
+            
+            # Log results
+            logger.info(f"Locator-based analysis found {len(careers_links)} careers links (no AI call needed)")
+            for link in careers_links[:3]:  # Log first 3
+                logger.info(f"  - {link.get('text')} ({link.get('confidence')}, score: {link.get('score')}) -> {link.get('href')}")
+            
+            # Calculate token savings
+            original_html_size = len(page_html)
+            data_sent_size = sum(len(str(link)) for link in careers_links)
+            reduction_pct = ((original_html_size - data_sent_size) / original_html_size * 100) if original_html_size > 0 else 0
+            logger.info(f"Token optimization: {original_html_size} -> {data_sent_size} chars ({reduction_pct:.1f} percent reduction, NO AI CALL)")
+            
+            return {
+                "careers_links": careers_links,
+                "reasoning": f"Found {len(careers_links)} career-related links using keyword matching (no AI needed)"
+            }
+        
+        except Exception as e:
+            logger.error(f"Locator-based page analysis failed: {e}", exc_info=True)
+            return {"careers_links": [], "reasoning": f"Error: {str(e)}"}
+    
+    def select_best_careers_link(self, careers_links: List[Dict]) -> Optional[Dict]:
+        """
+        Select the best careers link, using AI only when needed.
+        
+        OPTIMIZED 3-TIER APPROACH:
+        1. If only 1 link found -> return it (no AI call)
+        2. If an obvious exact-match exists -> return it (no AI call)
+        3. If ambiguous -> ask AI to pick the best one (~500 tokens)
+        
+        Args:
+            careers_links: List of career link dictionaries from locator analysis
+            
+        Returns:
+            Best careers link or None
+        """
+        if not careers_links:
+            return None
+        
+        # Tier 1: Only one link, return it
+        if len(careers_links) == 1:
+            logger.info(f"Only one careers link found, selecting it: {careers_links[0].get('text')}")
+            return careers_links[0]
+        
+        # Tier 2: Check for an obvious exact-match (skip AI call entirely)
+        exact_match_texts = {'careers', 'career', 'jobs', 'job openings', 'join us', 'join our team', 'work with us'}
+        for link in careers_links:
+            text_lower = link.get("text", "").strip().lower()
+            href_lower = link.get("href", "").lower()
+            # Strong signal: text is an exact career keyword
+            if text_lower in exact_match_texts:
+                logger.info(f"Exact-match career link found (no AI needed): '{link.get('text')}' -> {link.get('href')}")
+                return link
+            # Strong signal: href ends with /careers or /jobs
+            if href_lower.rstrip('/').endswith(('/careers', '/jobs', '/career')):
+                logger.info(f"URL-match career link found (no AI needed): '{link.get('text')}' -> {link.get('href')}")
+                return link
+        
+        try:
+            # Prepare compact link data for AI (only essential fields)
+            link_data = []
+            for i, link in enumerate(careers_links):
+                link_data.append({
+                    "index": i,
+                    "text": link.get("text", "")[:100],  # Limit text length
+                    "href": link.get("href", ""),
+                    "location": link.get("location", "body"),
+                    "confidence": link.get("confidence", "unknown")
+                })
+            
+            # AI prompt for link selection
+            prompt = """You are analyzing a homepage to find the careers page link.
+
+Below are candidate links found using keyword matching. Your task is to select the BEST link that leads to the careers/jobs page.
+
+CRITICAL RULES:
+1. Prioritize links with "careers", "jobs", "join us" in text or URL
+2. AVOID product pages, course pages, blog posts, or interview/test pages
+3. Footer and navigation links are usually more reliable than body content
+4. Shorter, cleaner link text is usually better than long descriptions
+
+Candidate links:
+"""
+            for link in link_data:
+                prompt += f"\n{link['index']}. Text: \"{link['text']}\"\n   URL: {link['href']}\n   Location: {link['location']}, Confidence: {link['confidence']}\n"
+            
+            prompt += """\nRespond with JSON in this format:
+{
+    "selected_index": <index of best link>,
+    "reasoning": "Why this link is the best choice"
+}"""
+            
+            # Call AI provider
+            from google.genai import types
+            response = self.provider.generate_planner_response(
+                prompt=prompt,
+                context={}
+            )
+            
+            # Parse AI response
+            import json
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            decision = json.loads(content)
+            selected_index = decision.get("selected_index")
+            
+            # Validate selected_index
+            if selected_index is None or not isinstance(selected_index, int):
+                logger.warning(f"AI returned invalid selected_index: {selected_index}, using first link")
+                selected_index = 0
+            elif selected_index < 0 or selected_index >= len(careers_links):
+                logger.warning(f"AI returned out-of-range index {selected_index}, using first link")
+                selected_index = 0
+            
+            reasoning = decision.get("reasoning", "No reasoning provided")
+            
+            # Log AI decision
+            if self.log_decisions:
+                self.structured_logger.log_ai_decision(
+                    decision_type="careers_link_selection",
+                    data={
+                        "selected_index": selected_index,
+                        "selected_text": careers_links[selected_index].get("text", ""),
+                        "selected_href": careers_links[selected_index].get("href", ""),
+                        "total_candidates": len(careers_links)
+                    },
+                    reasoning=reasoning
+                )
+            
+            logger.info(f"AI selected link {selected_index}: '{careers_links[selected_index].get('text')}'")
+            logger.info(f"AI reasoning: {reasoning}")
+            
+            # Log token usage
+            if response.usage:
+                tokens_used = response.usage.get("total_tokens", 0)
+                logger.info(f"Token usage for link selection: {tokens_used} tokens")
+                
+                self.structured_logger.log_api_usage(
+                    provider=self.provider.get_provider_name(),
+                    model=self.provider.model,
+                    endpoint="select_best_careers_link",
+                    tokens_used=tokens_used
+                )
+            
+            return careers_links[selected_index]
+        
+        except Exception as e:
+            logger.error(f"AI link selection failed: {e}", exc_info=True)
+            logger.warning("Falling back to first link")
+            return careers_links[0]
+    
     def plan_next_step(
         self, 
         job_data: Dict[str, Any],
@@ -136,19 +595,37 @@ Use these tools to query page state and make informed decisions."""
         Returns:
             Dictionary with next_step, reasoning, and status
         """
-        # Categorize elements for internal strategy methods and cleaner AI context
-        categorized_state = self._categorize_elements(dom_state)
+        # Use AX tree as primary context if available (much more token-efficient)
+        ax_snapshot = dom_state.get("ax_snapshot")
         
-        context = {
-            "job_title": job_data["title"],
-            "company": job_data["company"],
-            "location": job_data.get("location", ""),
-            "experience": job_data.get("experience", ""),
-            "user_details": job_data.get("user_details", {}),
-            "iteration": iteration,
-            "actions_taken": actions_taken,
-            "dom_state": categorized_state
-        }
+        if ax_snapshot:
+            # Primary path: Use compact AX tree for AI context
+            # This is ~5-10x more token-efficient than the categorized DOM state
+            context = {
+                "job_title": job_data["title"],
+                "company": job_data["company"],
+                "location": job_data.get("location", ""),
+                "experience": job_data.get("experience", ""),
+                "user_details": job_data.get("user_details", {}),
+                "iteration": iteration,
+                "actions_taken": actions_taken,
+                "page_url": dom_state.get("url", ""),
+                "page_title": dom_state.get("title", ""),
+                "accessibility_tree": ax_snapshot
+            }
+        else:
+            # Fallback: Use categorized DOM state (old approach)
+            categorized_state = self._categorize_elements(dom_state)
+            context = {
+                "job_title": job_data["title"],
+                "company": job_data["company"],
+                "location": job_data.get("location", ""),
+                "experience": job_data.get("experience", ""),
+                "user_details": job_data.get("user_details", {}),
+                "iteration": iteration,
+                "actions_taken": actions_taken,
+                "dom_state": categorized_state
+            }
         
         try:
             response = self.provider.generate_planner_response(
@@ -360,11 +837,13 @@ Use these tools to query page state and make informed decisions."""
         """
         Categorize flat elements list into links, buttons, and inputs for easier processing.
         
+        OPTIMIZED: Filters out non-essential elements and limits data sent to AI.
+        
         Args:
             dom_state: Original dom_state with "elements" list
             
         Returns:
-            Dictionary with categorized elements
+            Dictionary with categorized elements (optimized for token usage)
         """
         elements = dom_state.get("elements", [])
         categorized = {
@@ -372,9 +851,27 @@ Use these tools to query page state and make informed decisions."""
             "title": dom_state.get("title", ""),
             "links": [],
             "buttons": [],
-            "inputs": [],
-            "elements": elements # Keep original for reference
+            "inputs": []
         }
+        
+        # OPTIMIZATION: Only include essential fields to reduce tokens
+        def compact_element(el: Dict[str, Any]) -> Dict[str, Any]:
+            """Extract only essential fields from element"""
+            compact = {
+                "text": el.get("text", "")[:100],  # Limit text to 100 chars
+                "mmid": el.get("mmid", "")
+            }
+            
+            # Add type-specific fields
+            if el.get("tag") == "a":
+                compact["href"] = el.get("href", "")
+            elif el.get("tag") in ("input", "textarea", "select"):
+                compact["type"] = el.get("type", "")
+                compact["name"] = el.get("name", "")
+                compact["placeholder"] = el.get("placeholder", "")[:50]  # Limit placeholder
+                compact["required"] = el.get("required", False)
+            
+            return compact
         
         for el in elements:
             tag = el.get("tag", "").lower()
@@ -382,12 +879,23 @@ Use these tools to query page state and make informed decisions."""
             
             # Simple categorization logic
             if tag == "a" or el.get("role") == "link":
-                categorized["links"].append(el)
+                categorized["links"].append(compact_element(el))
             elif tag == "button" or el_type in ("button", "submit") or el.get("role") == "button":
-                categorized["buttons"].append(el)
+                categorized["buttons"].append(compact_element(el))
             elif tag in ("input", "textarea", "select") or el.get("role") in ("textbox", "checkbox", "combobox"):
-                categorized["inputs"].append(el)
-                
+                categorized["inputs"].append(compact_element(el))
+        
+        # OPTIMIZATION: Limit number of elements to reduce tokens
+        max_elements_per_type = 50  # Configurable limit
+        categorized["links"] = categorized["links"][:max_elements_per_type]
+        categorized["buttons"] = categorized["buttons"][:max_elements_per_type]
+        categorized["inputs"] = categorized["inputs"][:max_elements_per_type]
+        
+        # Log optimization stats
+        total_original = len(elements)
+        total_kept = len(categorized["links"]) + len(categorized["buttons"]) + len(categorized["inputs"])
+        logger.debug(f"DOM optimization: {total_original} → {total_kept} elements ({total_kept/total_original*100:.1f}% kept)")
+        
         return categorized
 
     def _plan_job_board_navigation(

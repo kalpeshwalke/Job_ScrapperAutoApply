@@ -1,0 +1,4 @@
+# file: D:\KALPESH\UDEMY\STOCK TRADING\PROJECT Trading\Job scrapper\src\ai_auto_apply\providers\ai_provider.py
+# hypothesis_version: 6.151.10
+
+['ai_model', 'ai_provider', 'llama3', 'local', 'ollama', 'stop']

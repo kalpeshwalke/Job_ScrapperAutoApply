@@ -1,0 +1,4 @@
+# file: D:\KALPESH\UDEMY\STOCK TRADING\PROJECT Trading\Job scrapper\src\ai_auto_apply\core\mcp_client.py
+# hypothesis_version: 6.151.10
+
+[0.0, 0.95, 0.99, 100, 1000, 30000, '-y', '1.0.0', '2.0', '2024-11-05', '=', 'Error Data:', 'Result:', 'Status: ERROR', 'Status: SUCCESS', 'Unknown code', 'Unknown error', 'args', 'arguments', 'autoApprove', 'average_latency_ms', 'call_count', 'capabilities', 'clientInfo', 'code', 'command', 'data', 'duration_ms', 'enabled', 'error', 'error_count', 'error_rate', 'fallback_to_legacy', 'id', 'initialize', 'jsonrpc', 'list_tools', 'max_retries', 'message', 'method', 'name', 'npx', 'p95_latency_ms', 'p99_latency_ms', 'params', 'per_tool_metrics', 'playwright_click', 'playwright_evaluate', 'playwright_fill', 'playwright_navigate', 'protocolVersion', 'result', 'serverInfo', 'success', 'timeout', 'tools', 'tools/call', 'tools/list', 'total_calls', 'total_errors', 'version', 'win32']

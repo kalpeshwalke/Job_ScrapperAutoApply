@@ -20,6 +20,9 @@ import threading
 
 logger = logging.getLogger(__name__)
 
+# MCP Protocol Version
+MCP_PROTOCOL_VERSION = "2024-11-05"
+
 
 @dataclass
 class MCPToolCall:
@@ -109,6 +112,151 @@ class MCPClient:
         
         logger.info(f"MCPClient initialized with timeout={self.timeout}s")
     
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+        """
+        Validate MCP configuration schema.
+        
+        Args:
+            config: Configuration dictionary to validate
+            
+        Returns:
+            (is_valid, error_message) tuple
+        """
+        # Check if enabled field exists and is boolean
+        if "enabled" in config:
+            if not isinstance(config["enabled"], bool):
+                return False, "mcp.enabled must be a boolean (true/false)"
+        
+        # If MCP is enabled, validate required fields
+        if config.get("enabled", False):
+            # Validate command field
+            if "command" not in config:
+                return False, "mcp.command is required when MCP is enabled"
+            if not isinstance(config["command"], str):
+                return False, "mcp.command must be a string"
+            if not config["command"].strip():
+                return False, "mcp.command cannot be empty"
+            
+            # Validate args field
+            if "args" not in config:
+                return False, "mcp.args is required when MCP is enabled"
+            if not isinstance(config["args"], list):
+                return False, "mcp.args must be a list"
+            
+            # Validate timeout field if present
+            if "timeout" in config:
+                if not isinstance(config["timeout"], (int, float)):
+                    return False, "mcp.timeout must be a number"
+                if config["timeout"] <= 0:
+                    return False, "mcp.timeout must be a positive number"
+            
+            # Validate fallback_to_legacy field if present
+            if "fallback_to_legacy" in config:
+                if not isinstance(config["fallback_to_legacy"], bool):
+                    return False, "mcp.fallback_to_legacy must be a boolean (true/false)"
+            
+            # Validate autoApprove field if present
+            if "autoApprove" in config:
+                if not isinstance(config["autoApprove"], list):
+                    return False, "mcp.autoApprove must be a list"
+        
+        return True, None
+    
+    def _initialize_protocol(self) -> bool:
+        """
+        Perform MCP protocol initialization handshake.
+        
+        The MCP protocol requires a specific initialization sequence:
+        1. Client sends 'initialize' request with protocol version and capabilities
+        2. Server responds with its capabilities
+        3. Client sends 'initialized' notification
+        
+        Returns:
+            True if initialization successful, False otherwise
+        """
+        try:
+            # Step 1: Send initialize request
+            initialize_request = {
+                "jsonrpc": "2.0",
+                "id": "initialize",
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {
+                        "tools": {}  # Client supports tool execution
+                    },
+                    "clientInfo": {
+                        "name": "ai-auto-apply-mcp-client",
+                        "version": "1.0.0"
+                    }
+                }
+            }
+            
+            logger.debug(f"Sending MCP initialize request with protocol version {MCP_PROTOCOL_VERSION}")
+            
+            # Send request
+            if self.process and self.process.stdin:
+                self.process.stdin.write(json.dumps(initialize_request) + "\n")
+                self.process.stdin.flush()
+            else:
+                logger.error("MCP server process stdin not available for initialization")
+                return False
+            
+            # Step 2: Wait for initialize response
+            if self.process and self.process.stdout:
+                response_line = self._read_line_with_timeout(self.process.stdout, self.timeout)
+                
+                if not response_line:
+                    logger.error("MCP server did not respond to initialize request within timeout")
+                    return False
+                
+                response = json.loads(response_line)
+                
+                # Check for error in response
+                if "error" in response:
+                    error_msg = response["error"].get("message", "Unknown error")
+                    error_code = response["error"].get("code", "Unknown code")
+                    logger.error(f"MCP initialization failed with error {error_code}: {error_msg}")
+                    return False
+                
+                # Extract server capabilities
+                result = response.get("result", {})
+                server_capabilities = result.get("capabilities", {})
+                server_info = result.get("serverInfo", {})
+                
+                logger.info(f"MCP server initialized: {server_info.get('name', 'unknown')} v{server_info.get('version', 'unknown')}")
+                logger.debug(f"Server capabilities: {server_capabilities}")
+            else:
+                logger.error("MCP server process stdout not available for initialization")
+                return False
+            
+            # Step 3: Send initialized notification
+            initialized_notification = {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {}
+            }
+            
+            logger.debug("Sending MCP initialized notification")
+            
+            if self.process and self.process.stdin:
+                self.process.stdin.write(json.dumps(initialized_notification) + "\n")
+                self.process.stdin.flush()
+            else:
+                logger.error("MCP server process stdin not available for initialized notification")
+                return False
+            
+            logger.info("MCP protocol initialization completed successfully")
+            return True
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse MCP server response during initialization: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"MCP protocol initialization failed: {e}", exc_info=True)
+            return False
+    
     def connect(self) -> bool:
         """
         Establish connection to MCP server by spawning the Playwright MCP server process.
@@ -150,11 +298,34 @@ class MCPClient:
                 logger.error(f"MCP server process terminated immediately. stderr: {stderr_output}")
                 return False
             
+            # Perform MCP protocol initialization handshake
+            logger.info("Performing MCP protocol initialization handshake")
+            if not self._initialize_protocol():
+                logger.error("MCP protocol initialization failed")
+                # Clean up the process
+                try:
+                    self.process.terminate()
+                    self.process.wait(timeout=5)
+                except Exception as cleanup_error:
+                    logger.warning(f"Error during process cleanup: {cleanup_error}")
+                    try:
+                        self.process.kill()
+                        self.process.wait()
+                    except:
+                        pass
+                return False
+            
             self.connected = True
             logger.info("MCP server connection established")
             
             # Discover available tools
-            self.list_tools()
+            tools = self.list_tools()
+            
+            # Validate critical tools are available
+            if not self._validate_critical_tools(tools):
+                logger.error("Critical MCP tools missing, connection failed")
+                self.disconnect()
+                return False
             
             return True
             
@@ -196,13 +367,14 @@ class MCPClient:
         except Exception as e:
             logger.error(f"Error disconnecting MCP server: {e}", exc_info=True)
     
-    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def call_tool(self, tool_name: str, arguments: Dict[str, Any], max_retries: Optional[int] = None) -> Dict[str, Any]:
         """
-        Execute an MCP tool and return results.
+        Execute an MCP tool and return results with retry logic.
         
         Args:
             tool_name: Name of the tool to execute
             arguments: Tool arguments as dictionary
+            max_retries: Maximum number of retries (default: from config or 3)
             
         Returns:
             Dictionary containing execution results:
@@ -221,99 +393,145 @@ class MCPClient:
                 "duration_ms": 0.0
             }
         
-        request_id = f"{tool_name}_{int(time.time() * 1000)}"
-        start_time = time.time()
+        # Get max retries from parameter, config, or default to 3
+        if max_retries is None:
+            max_retries = self.config.get("max_retries", 3)
         
-        try:
-            # Format MCP protocol request
-            request = {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": "tools/call",
-                "params": {
-                    "name": tool_name,
-                    "arguments": arguments
+        # Retry loop with exponential backoff
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            request_id = f"{tool_name}_{int(time.time() * 1000)}"
+            start_time = time.time()
+            
+            try:
+                # Format MCP protocol request
+                request = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/call",
+                    "params": {
+                        "name": tool_name,
+                        "arguments": arguments
+                    }
                 }
-            }
-            
-            logger.debug(f"Sending MCP request: {tool_name} with args: {arguments}")
-            
-            # Send request to server
-            if self.process and self.process.stdin:
-                self.process.stdin.write(json.dumps(request) + "\n")
-                self.process.stdin.flush()
-            else:
-                raise RuntimeError("MCP server process stdin not available")
-            
-            # Wait for response with timeout (Windows-compatible)
-            response_line = None
-            if self.process and self.process.stdout:
-                response_line = self._read_line_with_timeout(self.process.stdout, self.timeout)
-                if response_line is None:
-                    raise TimeoutError(f"MCP tool call timed out after {self.timeout}s")
-            
-            # Parse response
-            if response_line:
-                response = json.loads(response_line)
                 
-                # Calculate duration
-                duration_ms = (time.time() - start_time) * 1000
+                if attempt > 1:
+                    logger.info(f"MCP tool {tool_name} retry attempt {attempt}/{max_retries}")
+                else:
+                    logger.debug(f"Sending MCP request: {tool_name} with args: {arguments}")
                 
-                # Check for error in response
-                if "error" in response:
-                    error_msg = response["error"].get("message", "Unknown error")
-                    logger.error(f"MCP tool {tool_name} failed: {error_msg}")
+                # Send request to server
+                if self.process and self.process.stdin:
+                    self.process.stdin.write(json.dumps(request) + "\n")
+                    self.process.stdin.flush()
+                else:
+                    raise RuntimeError("MCP server process stdin not available")
+                
+                # Wait for response with timeout (Windows-compatible)
+                response_line = None
+                if self.process and self.process.stdout:
+                    response_line = self._read_line_with_timeout(self.process.stdout, self.timeout)
+                    if response_line is None:
+                        raise TimeoutError(f"MCP tool call timed out after {self.timeout}s")
+                
+                # Parse response
+                if response_line:
+                    response = json.loads(response_line)
+                    
+                    # Calculate duration
+                    duration_ms = (time.time() - start_time) * 1000
+                    
+                    # Check for error in response
+                    if "error" in response:
+                        error_msg = response["error"].get("message", "Unknown error")
+                        logger.error(f"MCP tool {tool_name} failed: {error_msg}")
+                        
+                        # Record metrics
+                        self._record_call(tool_name, duration_ms, False)
+                        
+                        # Store error for potential retry
+                        last_error = {
+                            "success": False,
+                            "error": error_msg,
+                            "result": None,
+                            "duration_ms": duration_ms
+                        }
+                        
+                        # Retry on error if attempts remain
+                        if attempt < max_retries:
+                            delay = 2 ** attempt  # Exponential backoff: 2s, 4s, 8s
+                            logger.warning(f"MCP tool {tool_name} failed (attempt {attempt}/{max_retries}), retrying in {delay}s")
+                            time.sleep(delay)
+                            continue
+                        
+                        return last_error
+                    
+                    # Extract result
+                    result = response.get("result", {})
                     
                     # Record metrics
-                    self._record_call(tool_name, duration_ms, False)
+                    self._record_call(tool_name, duration_ms, True)
+                    
+                    logger.debug(f"MCP tool {tool_name} succeeded in {duration_ms:.2f}ms")
                     
                     return {
-                        "success": False,
-                        "error": error_msg,
-                        "result": None,
+                        "success": True,
+                        "result": result,
+                        "error": None,
                         "duration_ms": duration_ms
                     }
+                else:
+                    raise RuntimeError("No response received from MCP server")
+                    
+            except TimeoutError as e:
+                duration_ms = (time.time() - start_time) * 1000
+                logger.error(f"MCP tool {tool_name} timed out: {e}")
+                self._record_call(tool_name, duration_ms, False)
                 
-                # Extract result
-                result = response.get("result", {})
-                
-                # Record metrics
-                self._record_call(tool_name, duration_ms, True)
-                
-                logger.debug(f"MCP tool {tool_name} succeeded in {duration_ms:.2f}ms")
-                
-                return {
-                    "success": True,
-                    "result": result,
-                    "error": None,
+                last_error = {
+                    "success": False,
+                    "error": str(e),
+                    "result": None,
                     "duration_ms": duration_ms
                 }
-            else:
-                raise RuntimeError("No response received from MCP server")
                 
-        except TimeoutError as e:
-            duration_ms = (time.time() - start_time) * 1000
-            logger.error(f"MCP tool {tool_name} timed out: {e}")
-            self._record_call(tool_name, duration_ms, False)
-            
-            return {
-                "success": False,
-                "error": str(e),
-                "result": None,
-                "duration_ms": duration_ms
-            }
-            
-        except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
-            logger.error(f"MCP tool {tool_name} failed: {e}", exc_info=True)
-            self._record_call(tool_name, duration_ms, False)
-            
-            return {
-                "success": False,
-                "error": str(e),
-                "result": None,
-                "duration_ms": duration_ms
-            }
+                # Retry on timeout if attempts remain
+                if attempt < max_retries:
+                    delay = 2 ** attempt  # Exponential backoff: 2s, 4s, 8s
+                    logger.warning(f"MCP tool {tool_name} timed out (attempt {attempt}/{max_retries}), retrying in {delay}s")
+                    time.sleep(delay)
+                    continue
+                
+                return last_error
+                
+            except Exception as e:
+                duration_ms = (time.time() - start_time) * 1000
+                logger.error(f"MCP tool {tool_name} failed: {e}", exc_info=True)
+                self._record_call(tool_name, duration_ms, False)
+                
+                last_error = {
+                    "success": False,
+                    "error": str(e),
+                    "result": None,
+                    "duration_ms": duration_ms
+                }
+                
+                # Retry on exception if attempts remain
+                if attempt < max_retries:
+                    delay = 2 ** attempt  # Exponential backoff: 2s, 4s, 8s
+                    logger.warning(f"MCP tool {tool_name} failed (attempt {attempt}/{max_retries}), retrying in {delay}s: {e}")
+                    time.sleep(delay)
+                    continue
+                
+                return last_error
+        
+        # Return last error if all retries exhausted
+        return last_error if last_error else {
+            "success": False,
+            "error": "All retry attempts exhausted",
+            "result": None,
+            "duration_ms": 0.0
+        }
     
     def list_tools(self) -> List[Dict[str, Any]]:
         """
@@ -369,6 +587,38 @@ class MCPClient:
         except Exception as e:
             logger.error(f"Failed to list MCP tools: {e}", exc_info=True)
             return []
+    
+    def _validate_critical_tools(self, tools: List[Dict[str, Any]]) -> bool:
+        """
+        Validate that critical tools are available.
+        
+        Args:
+            tools: List of available tools from list_tools()
+            
+        Returns:
+            True if all critical tools present, False otherwise
+        """
+        # Define critical tools required for operation
+        critical_tools = [
+            "playwright_navigate",
+            "playwright_click",
+            "playwright_fill",
+            "playwright_evaluate"
+        ]
+        
+        # Extract tool names from tools list
+        available_tool_names = [tool.get("name", "") for tool in tools]
+        
+        # Check for missing critical tools
+        missing_tools = [tool for tool in critical_tools if tool not in available_tool_names]
+        
+        if missing_tools:
+            logger.warning(f"Missing critical MCP tools: {', '.join(missing_tools)}")
+            logger.warning(f"Available tools: {', '.join(available_tool_names)}")
+            return False
+        
+        logger.info(f"All critical MCP tools validated: {', '.join(critical_tools)}")
+        return True
     
     def get_metrics(self) -> Dict[str, Any]:
         """
@@ -478,6 +728,60 @@ class MCPClient:
             
             # Record per-tool metrics
             self.tool_metrics[tool_name].add_call(duration_ms, success)
+    
+    @staticmethod
+    def pretty_print_response(response: Dict[str, Any]) -> str:
+        """
+        Format MCP JSON-RPC response for human-readable logging.
+        
+        Args:
+            response: JSON-RPC response dictionary
+            
+        Returns:
+            Formatted multi-line string representation
+        """
+        import json
+        from datetime import datetime
+        
+        lines = []
+        lines.append("=" * 60)
+        lines.append("MCP JSON-RPC Response")
+        lines.append("=" * 60)
+        lines.append(f"Timestamp: {datetime.now().isoformat()}")
+        lines.append("")
+        
+        # Request ID
+        if "id" in response:
+            lines.append(f"Request ID: {response['id']}")
+        
+        # JSON-RPC version
+        if "jsonrpc" in response:
+            lines.append(f"JSON-RPC Version: {response['jsonrpc']}")
+        
+        lines.append("")
+        
+        # Result or Error
+        if "result" in response:
+            lines.append("Status: SUCCESS")
+            lines.append("")
+            lines.append("Result:")
+            lines.append(json.dumps(response["result"], indent=2))
+        elif "error" in response:
+            error = response["error"]
+            lines.append("Status: ERROR")
+            lines.append("")
+            lines.append(f"Error Code: {error.get('code', 'N/A')}")
+            lines.append(f"Error Message: {error.get('message', 'N/A')}")
+            if "data" in error:
+                lines.append("Error Data:")
+                lines.append(json.dumps(error["data"], indent=2))
+        else:
+            lines.append("Status: UNKNOWN (no result or error)")
+        
+        lines.append("")
+        lines.append("=" * 60)
+        
+        return "\n".join(lines)
     
     def __enter__(self):
         """Context manager entry"""

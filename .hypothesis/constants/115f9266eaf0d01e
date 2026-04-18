@@ -1,0 +1,4 @@
+# file: D:\KALPESH\UDEMY\STOCK TRADING\PROJECT Trading\Job scrapper\src\ai_auto_apply\core\structured_logger.py
+# hypothesis_version: 6.151.10
+
+['AI Decision: %s - %s', 'No', 'Yes', 'action_type', 'arguments', 'attempts', 'careers_url', 'company', 'company_name', 'component', 'context', 'data', 'decision_type', 'details', 'duration_ms', 'element', 'endpoint', 'error', 'file_path', 'job_title', 'log_ai_decisions', 'log_api_usage', 'log_dom_interactions', 'method', 'metrics', 'metrics_type', 'model', 'original_url', 'outcome', 'provider', 'rate_limit_status', 'reason', 'reasoning', 'resource_type', 'response_time_ms', 'result', 'status', 'status_code', 'success', 'timestamp', 'tokens_used', 'tool_name', 'url', 'wait_type']

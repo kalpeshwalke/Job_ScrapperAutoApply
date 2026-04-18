@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@executeautomation/playwright-mcp-server"],
+      "autoApprove": ["playwright_*"],
+      "timeout": 120000,
+      "enabled": true
+    }
+  },
+  "fallback": {
+    "use_legacy_on_mcp_failure": true,
+    "max_mcp_retries": 3
+  },
+  "logging": {
+    "log_mcp_calls": true,
+    "log_mcp_responses": true
+  }
+}

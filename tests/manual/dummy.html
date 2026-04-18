@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Careers - Dummy Company</title>
+</head>
+<body>
+    <h1>Apply for QA Automation Engineer</h1>
+    
+    <form id="apply-form" action="/success.html" method="POST">
+        <div>
+            <label for="fname">First Name *</label>
+            <input type="text" id="fname" name="firstname" />
+        </div>
+        
+        <div>
+            <label for="lname">Last Name *</label>
+            <input type="text" id="lname" name="lastname" />
+        </div>
+        
+        <div>
+            <label for="email">Email Address *</label>
+            <input type="email" id="email" name="useremail" />
+        </div>
+        
+        <div>
+            <label for="phone">Mobile Number</label>
+            <input type="text" id="phone" name="phone" />
+        </div>
+        
+        <div>
+            <label for="ctc">Current CTC (in LPA)</label>
+            <input type="number" id="ctc" name="current_ctc" />
+        </div>
+        
+        <div>
+            <label for="notice">Notice Period (Days)</label>
+            <select id="notice" name="notice_period">
+                <option value="">Select...</option>
+                <option value="immediate">Immediate</option>
+                <option value="15">15 Days</option>
+                <option value="30">30 Days</option>
+                <option value="60">60 Days</option>
+            </select>
+        </div>
+        
+        <div>
+            <label for="resume">Upload Resume/CV</label>
+            <input type="file" id="resume" name="resume_file" accept=".pdf,.doc,.docx" />
+        </div>
+        
+        <div>
+            <p>Do you have experience with Playwright?</p>
+            <input type="radio" id="play_yes" name="playwright_exp" value="yes" />
+            <label for="play_yes">Yes</label>
+            <input type="radio" id="play_no" name="playwright_exp" value="no" />
+            <label for="play_no">No</label>
+        </div>
+        
+        <div style="margin-top: 20px;">
+            <button type="submit" id="submit-btn" class="apply-btn">Submit Application</button>
+        </div>
+    </form>
+</body>
+</html>

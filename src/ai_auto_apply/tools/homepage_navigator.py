@@ -35,8 +35,7 @@ class HomepageNavigator:
         "vacancies": 5,
         "positions": 4,
         "apply": 4,
-        "talent": 3,
-        "team": 2,
+
     }
     
     def __init__(self, page: Page, config: Dict[str, Any]):
@@ -79,9 +78,11 @@ class HomepageNavigator:
         
         Implements intelligent link detection by:
         1. Querying all links with href attributes
-        2. Scoring links based on text and href keyword matches
-        3. Boosting score for navigation elements (header, footer, nav)
-        4. Returning highest scoring link
+        2. Filtering out external social media links
+        3. Scoring links based on text and href keyword matches
+        4. Boosting score for navigation elements (header, footer, nav)
+        5. Prioritizing same-domain links
+        6. Returning highest scoring link
         
         Validates Requirements: 1.5, 16.2, 16.3, 16.4
         
@@ -90,6 +91,18 @@ class HomepageNavigator:
         """
         try:
             logger.info("Searching for careers navigation link on page")
+            
+            # Get current domain for filtering
+            from urllib.parse import urlparse
+            current_domain = urlparse(self.page.url).netloc.lower()
+            logger.debug(f"Current domain: {current_domain}")
+            
+            # Social media domains to exclude
+            social_media_domains = [
+                'facebook.com', 'fb.com', 'linkedin.com', 'twitter.com', 'x.com',
+                'instagram.com', 'youtube.com', 'tiktok.com', 'pinterest.com',
+                'reddit.com', 'snapchat.com', 'whatsapp.com', 'telegram.org'
+            ]
             
             # Step 1: Get all links with href attributes
             links = self.page.locator("a[href]").all()
@@ -112,6 +125,17 @@ class HomepageNavigator:
                     
                     # Skip empty links
                     if not text and not href:
+                        continue
+                    
+                    # Filter out social media links
+                    is_social_media = False
+                    for social_domain in social_media_domains:
+                        if social_domain in href_lower:
+                            is_social_media = True
+                            logger.debug(f"Skipping social media link: {href[:50]}")
+                            break
+                    
+                    if is_social_media:
                         continue
                     
                     # Calculate base score from keyword matches
@@ -158,6 +182,23 @@ class HomepageNavigator:
                         score = int(score * 1.5)  # 50% boost for navigation elements
                         logger.debug(f"Navigation boost applied to link: {text[:50]}")
                     
+                    # Step 4: Boost score for same-domain links
+                    is_same_domain = False
+                    try:
+                        link_domain = urlparse(href).netloc.lower()
+                        # Check if same domain or subdomain
+                        if link_domain == current_domain or link_domain.endswith('.' + current_domain) or current_domain.endswith('.' + link_domain):
+                            is_same_domain = True
+                            score = int(score * 2.0)  # 100% boost for same-domain links
+                            logger.debug(f"Same-domain boost applied to link: {text[:50]}")
+                        # Also consider relative URLs as same-domain
+                        elif not link_domain or href.startswith('/') or href.startswith('#'):
+                            is_same_domain = True
+                            score = int(score * 2.0)
+                            logger.debug(f"Relative URL boost applied to link: {text[:50]}")
+                    except Exception as e:
+                        logger.debug(f"Could not parse link domain: {e}")
+                    
                     # Store scored link
                     scored_links.append({
                         "link": link,
@@ -165,12 +206,13 @@ class HomepageNavigator:
                         "href": href,
                         "score": score,
                         "in_navigation": is_in_navigation,
+                        "is_same_domain": is_same_domain,
                         "matched_keywords": matched_keywords
                     })
                     
                     logger.debug(
                         f"Link scored: text='{text[:50]}', href='{href[:50]}', "
-                        f"score={score}, nav={is_in_navigation}, keywords={matched_keywords}"
+                        f"score={score}, nav={is_in_navigation}, same_domain={is_same_domain}, keywords={matched_keywords}"
                     )
                     
                 except Exception as e:
@@ -189,7 +231,7 @@ class HomepageNavigator:
             logger.info(
                 f"Best careers link found: text='{best_link['text'][:50]}', "
                 f"href='{best_link['href'][:50]}', score={best_link['score']}, "
-                f"in_navigation={best_link['in_navigation']}"
+                f"in_navigation={best_link['in_navigation']}, same_domain={best_link['is_same_domain']}"
             )
             
             # Log top 3 candidates for debugging
@@ -198,7 +240,7 @@ class HomepageNavigator:
                 for i, candidate in enumerate(scored_links[:3], 1):
                     logger.debug(
                         f"  {i}. text='{candidate['text'][:40]}', "
-                        f"score={candidate['score']}, keywords={candidate['matched_keywords']}"
+                        f"score={candidate['score']}, same_domain={candidate['is_same_domain']}, keywords={candidate['matched_keywords']}"
                     )
             
             return {
@@ -206,7 +248,8 @@ class HomepageNavigator:
                 "href": best_link["href"],
                 "locator": best_link["link"],
                 "score": best_link["score"],
-                "in_navigation": best_link["in_navigation"]
+                "in_navigation": best_link["in_navigation"],
+                "is_same_domain": best_link["is_same_domain"]
             }
             
         except Exception as e:

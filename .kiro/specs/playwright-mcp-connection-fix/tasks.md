@@ -1,0 +1,124 @@
+# Implementation Plan
+
+- [x] 1. Write bug condition exploration test
+  - **Property 1: Bug Condition** - MCP Connection Without Protocol Handshake
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate the bug exists
+  - **Scoped PBT Approach**: For deterministic bugs, scope the property to the concrete failing case(s) to ensure reproducibility
+  - Test that MCPClient.connect() fails when attempting to connect without performing the MCP protocol initialization handshake
+  - Verify connection closes immediately with error code -32000 ("Connection closed")
+  - Test implementation details from Bug Condition in design:
+    - Server process spawned successfully
+    - No initialize request sent
+    - list_tools() called immediately
+    - Connection closes with error -32000
+  - The test assertions should match the Expected Behavior Properties from design:
+    - Connection should establish successfully
+    - Handshake should complete (initialize request → response → initialized notification)
+    - Tools should be discoverable after handshake
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists)
+  - Document counterexamples found to understand root cause (e.g., "Connection closes immediately when list_tools() is called without prior initialize request")
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 1.1, 1.2, 1.3_
+
+- [x] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Non-MCP Functionality Preservation
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for non-buggy inputs (operations that don't involve Playwright MCP server initialization)
+  - Write property-based tests capturing observed behavior patterns from Preservation Requirements:
+    - Non-MCP Playwright operations (direct Playwright usage without MCP)
+    - Other MCP server connections (if any non-Playwright MCP servers exist)
+    - MCP connection logging and error reporting
+    - AI auto-apply system functionality without MCP integration
+  - Property-based testing generates many test cases for stronger guarantees
+  - Test cases to implement:
+    - Direct Playwright browser automation (non-MCP) continues to work
+    - AI provider interactions are unaffected
+    - FSM orchestrator workflow operates correctly
+    - Configuration loading and validation continues to work
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4_
+
+- [x] 3. Fix for Playwright MCP Connection Issue
+
+  - [x] 3.1 Add MCP protocol initialization method
+    - Create new private method `_initialize_protocol()` in `src/ai_auto_apply/core/mcp_client.py`
+    - Implement the complete MCP protocol handshake sequence:
+      - Send `initialize` request with protocol version and client capabilities
+      - Wait for server response with timeout
+      - Parse server capabilities from response
+      - Send `initialized` notification to complete handshake
+      - Return success/failure status
+    - Add protocol version constant: `MCP_PROTOCOL_VERSION = "2024-11-05"`
+    - Add client capabilities declaration (support for tool execution)
+    - Include proper error handling for each step of the handshake
+    - Add detailed logging for initialization steps
+    - _Bug_Condition: isBugCondition(connection_attempt) where connection_attempt.server_spawned = true AND connection_attempt.initialize_request_sent = false_
+    - _Expected_Behavior: Connection establishes successfully with complete handshake (initialize request → response → initialized notification)_
+    - _Preservation: Non-MCP Playwright operations, other MCP servers, logging, AI operations remain unchanged_
+    - _Requirements: 2.1, 2.2, 2.3_
+
+  - [x] 3.2 Modify connect() method to perform handshake
+    - Update `connect()` method in `src/ai_auto_apply/core/mcp_client.py`
+    - After spawning the server process and verifying it's running:
+      - Call `_initialize_protocol()` before calling `list_tools()`
+      - Handle initialization failures gracefully with appropriate error messages
+      - Only proceed to tool discovery if initialization succeeds
+      - Clean up process on initialization failure (terminate and wait)
+    - Improve error handling to distinguish between:
+      - Server spawn failures
+      - Protocol initialization failures
+      - Tool discovery failures
+    - Add specific error messages for each failure mode
+    - _Bug_Condition: isBugCondition(connection_attempt) where list_tools() is called without prior initialization_
+    - _Expected_Behavior: Handshake completes before tool discovery, connection remains open_
+    - _Preservation: Existing error handling and logging behavior preserved_
+    - _Requirements: 2.1, 2.2, 2.3_
+
+  - [x] 3.3 Add helper method for reading server responses
+    - Create `_read_line_with_timeout()` helper method if not already present
+    - Implement timeout handling for reading server responses
+    - Handle edge cases: empty responses, malformed JSON, connection closed
+    - Add appropriate error logging
+    - _Expected_Behavior: Robust response reading with timeout protection_
+    - _Preservation: Existing I/O handling patterns preserved_
+    - _Requirements: 2.1, 2.2_
+
+  - [x] 3.4 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - MCP Connection With Protocol Handshake
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - Verify:
+      - Connection establishes successfully
+      - Handshake completes (initialize request → response → initialized notification)
+      - Tools are discoverable after handshake
+      - No error -32000 occurs
+    - _Requirements: 2.1, 2.2, 2.3_
+
+  - [x] 3.5 Verify preservation tests still pass
+    - **Property 2: Preservation** - Non-MCP Functionality Preservation
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Confirm all tests still pass after fix:
+      - Direct Playwright operations work correctly
+      - AI provider interactions unchanged
+      - FSM orchestrator workflow unchanged
+      - Configuration loading unchanged
+      - Logging and error reporting unchanged
+    - _Requirements: 3.1, 3.2, 3.3, 3.4_
+
+- [x] 4. Checkpoint - Ensure all tests pass
+  - Run complete test suite to verify all tests pass
+  - Verify bug condition test passes (confirms fix works)
+  - Verify preservation tests pass (confirms no regressions)
+  - Run integration tests if available
+  - Ask the user if questions arise or if manual testing is needed

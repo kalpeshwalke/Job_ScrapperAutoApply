@@ -72,6 +72,30 @@ class AIProvider(ABC):
             AIResponse with tool_calls for DOM manipulation
         """
         pass
+
+    def generate_completion(
+        self,
+        prompt: str,
+        system_prompt: str = "Respond only with valid JSON. No explanation.",
+    ) -> AIResponse:
+        """
+        Generate a minimal JSON completion without planner/browser context.
+        Used by NarrowAI for constrained schema-only calls.
+        
+        Default implementation delegates to generate_planner_response.
+        Providers can override for a cleaner path.
+        
+        Args:
+            prompt: The full prompt text
+            system_prompt: Minimal system instruction
+            
+        Returns:
+            AIResponse with JSON content
+        """
+        return self.generate_planner_response(
+            prompt=f"{system_prompt}\n\n{prompt}",
+            context={},
+        )
     
     @abstractmethod
     def get_provider_name(self) -> str:
@@ -101,62 +125,17 @@ class AIProviderFactory:
     def create_provider(config: Dict[str, Any]) -> AIProvider:
         """
         Create an AI provider instance based on configuration.
-        
-        Args:
-            config: Configuration dictionary with ai_provider, ai_model, etc.
-            
-        Returns:
-            Concrete AIProvider instance
-            
-        Raises:
-            ValueError: If provider is unsupported or API key is missing
+        Currently supports only Ollama for unlimited free local usage.
         """
-        provider_name = config.get("ai_provider", "gemini").lower()
-        model = config.get("ai_model")
+        provider_name = config.get("ai_provider", "ollama").lower()
+        model = config.get("ai_model", "llama3")
         
-        # Map provider names to environment variable keys
-        env_key_map = {
-            "gemini": "GEMINI_API_KEY",
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "deepseek": "DEEPSEEK_API_KEY",
-            "groq": "GROQ_API_KEY",
-            "ollama": None  # No API key needed for local
-        }
-        
-        # Get API key from environment
-        env_key = env_key_map.get(provider_name)
-        if env_key:
-            api_key = os.getenv(env_key)
-            if not api_key:
-                raise ValueError(
-                    f"API key not found for provider '{provider_name}'. "
-                    f"Please set {env_key} environment variable."
-                )
-        else:
-            api_key = ""  # Ollama doesn't need API key
-        
-        # Import and create provider instance
-        if provider_name == "gemini":
-            from src.ai_auto_apply.providers.gemini_provider import GeminiProvider
-            return GeminiProvider(api_key, model, config)
-        elif provider_name == "openai":
-            from src.ai_auto_apply.providers.openai_provider import OpenAIProvider
-            return OpenAIProvider(api_key, model, config)
-        elif provider_name == "anthropic":
-            from src.ai_auto_apply.providers.anthropic_provider import AnthropicProvider
-            return AnthropicProvider(api_key, model, config)
-        elif provider_name == "ollama":
-            from src.ai_auto_apply.providers.ollama_provider import OllamaProvider
-            return OllamaProvider(api_key, model, config)
-        elif provider_name == "deepseek":
-            from src.ai_auto_apply.providers.deepseek_provider import DeepSeekProvider
-            return DeepSeekProvider(api_key, model, config)
-        elif provider_name == "groq":
-            from src.ai_auto_apply.providers.groq_provider import GroqProvider
-            return GroqProvider(api_key, model, config)
-        else:
+        if provider_name != "ollama":
             raise ValueError(
-                f"Unsupported AI provider: {provider_name}. "
-                f"Supported providers: gemini, openai, anthropic, ollama, deepseek, groq"
+                f"Only 'ollama' provider is supported. Got: '{provider_name}'\n"
+                f"Please update config.yaml: ai_provider: 'ollama'"
             )
+        
+        # Ollama doesn't need an API key
+        from src.ai_auto_apply.providers.ollama_provider import OllamaProvider
+        return OllamaProvider("local", model, config)

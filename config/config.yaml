@@ -162,9 +162,9 @@ scheduling:
 auto_apply:
   enabled: true                    # Enable/disable auto-apply feature
   
-  # AI provider selection
-  ai_provider: "groq"              # Options: gemini, openai, anthropic, ollama, deepseek, groq
-  ai_model: "llama-3.3-70b-versatile"  # Groq's best model for reasoning
+  # AI Provider Configuration (Single Provider - Ollama for unlimited free usage)
+  ai_provider: "ollama"            # Local Ollama provider (no API key needed)
+  ai_model: "qwen2.5:7b"           # Local model name (using your installed model)
   
   # Resume and user details
   resume_path: ""                  # Path to resume PDF (empty = skip upload)
@@ -179,7 +179,7 @@ auto_apply:
   
   # MCP (Model Context Protocol) configuration
   mcp:
-    enabled: false                 # Enable/disable MCP integration
+    enabled: true                  # Enable/disable MCP integration
     config_path: ".kiro/settings/mcp.json"  # Path to MCP configuration file
   
   # Homepage navigation settings

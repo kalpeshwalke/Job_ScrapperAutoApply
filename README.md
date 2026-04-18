@@ -4,6 +4,18 @@ AI-powered job scraping and autonomous application engine. Uses Playwright and D
 
 ---
 
+## 📚 Documentation Guide
+
+**Core Documentation:**
+- **README.md** (this file) - Project overview, installation, and Ollama setup.
+- **TECHNICAL_GUIDE.md** - Deep dive into AI system architecture, token optimization, and automatic popup handling.
+
+**Configuration:**
+- **config/config.yaml** - All configuration options with inline comments.
+- **.env.example** - Environment variables template.
+
+---
+
 ## Core Capabilities
 
 ### High-Performance Scraping
@@ -13,8 +25,8 @@ AI-powered job scraping and autonomous application engine. Uses Playwright and D
 - **Resilient Pipeline**: Per-platform timeouts and partial-save logic ensure you get results even when a specific platform is unreachable.
 
 ### Autonomous Application Engine
+- **Local AI Sovereignty**: Powered by **Ollama** for 100% free, unlimited, and private job applications without third-party API keys, quotas, or rate limits.
 - **Universal Workflow Logic**: Orchestrates a Finite State Machine (FSM) that adapts to diverse career page structures across the enterprise landscape.
-- **Multi-Backend Support**: Seamlessly switch between logic engines including DeepSeek, Gemini, and local Ollama instances.
 - **Career Page Integrity**: Automated validation ensures career page URLs are active and correctly mapped before tracking begins.
 - **Anti-Spam Intelligence**: Atomic Excel-based tracking ensures that each job is only ever processed once by the engine.
 - **Visual Feedback Loop**: Optional screenshot capture and detailed DOM interaction logging provide total visibility into the application process.
@@ -56,14 +68,48 @@ profile:
   skills: ["Playwright", "Selenium", "API Testing"]
 ```
 
-### 4. Running the System
+### 4. Ollama Setup (Required for Auto-Apply)
+
+**Install Ollama:**
+1. Download from [ollama.com/download/windows](https://ollama.com/download/windows)
+2. Run the installer
+3. Pull the llama3 model: `ollama pull llama3`
+4. Verify installation: `ollama list`
+
+**Test Your Setup:**
+```bash
+python test_ollama_setup.py
+```
+
+This will verify:
+- ✅ Ollama is running
+- ✅ llama3 model is available
+- ✅ JSON generation works
+- ✅ Tool calling format is correct
+- ✅ Config is properly set
+
+**Why Ollama?**
+- 🆓 **100% Free** - No API costs ever
+- ♾️ **Unlimited Usage** - No rate limits or quotas
+- 🔒 **Privacy** - All processing happens locally
+- 🚀 **Fast** - 2-5 seconds per response
+- 📴 **Offline** - Works without internet after model download
+
+### 5. Running the System
+
 **Graphical Mode (Windows)**:
-Double-click `job_run_scraper.bat` to launch the interactive CLI menu.
+Double-click `run_scraper.bat` in the root directory.
 
 **Manual Launch**:
 ```bash
 python main.py
 ```
+
+**First Time Setup:**
+1. Configure your profile in `config/config.yaml`.
+2. Set up Ollama (see step 4 above).
+3. Run `python tests/manual/test_ollama_setup.py` to verify.
+4. Launch the scraper with `python main.py` or `run_scraper.bat`.
 
 ---
 
@@ -87,3 +133,7 @@ Distributed under the **MIT License**. See `LICENSE` for more information.
 ---
 
 *Professionally engineered for stable, efficient, and ethical automated job hunting.*
+## Troubleshooting (Windows)
+If you see errors related to emojis or characters in your terminal, use:
+`python test_ollama_setup.py`
+The script has been updated with an ASCII fallback mode to ensure compatibility with standard Windows Command Prompt and PowerShell.

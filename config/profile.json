@@ -1,0 +1,82 @@
+{
+    "personal": {
+        "first_name": "Kalpesh",
+        "last_name": "Walke",
+        "full_name": "Kalpesh Walke",
+        "email": "kalpesh.walke@example.com",
+        "phone": "+91-9876543210",
+        "location": "Pune, Maharashtra, India",
+        "city": "Pune",
+        "state": "Maharashtra",
+        "country": "India",
+        "pincode": "411001",
+        "linkedin": "https://linkedin.com/in/kalpeshwalke",
+        "portfolio": "",
+        "github": ""
+    },
+    "professional": {
+        "current_title": "QA Engineer",
+        "years_experience": 3,
+        "current_company": "Current Company",
+        "current_ctc": "6 LPA",
+        "expected_ctc": "9 LPA",
+        "notice_period": "30 days",
+        "work_authorization": "Indian Citizen",
+        "willing_to_relocate": false,
+        "preferred_work_mode": "Remote",
+        "highest_education": "B.Tech in Computer Science",
+        "university": "Pune University",
+        "graduation_year": 2021
+    },
+    "skills": {
+        "primary": [
+            "Manual Testing",
+            "Selenium",
+            "Playwright",
+            "API Testing",
+            "Postman",
+            "Python",
+            "Java"
+        ],
+        "secondary": [
+            "SQL",
+            "Git",
+            "JIRA",
+            "Jenkins",
+            "Docker",
+            "REST API",
+            "Agile/Scrum"
+        ],
+        "certifications": []
+    },
+    "resume_path": "",
+    "preferences": {
+        "target_roles": [
+            "QA Engineer",
+            "Software Tester",
+            "SDET",
+            "Automation Engineer",
+            "Test Engineer",
+            "Quality Analyst"
+        ],
+        "min_salary_lpa": 7,
+        "max_experience_years": 5,
+        "locations": ["Pune", "Mumbai", "Bangalore", "Remote"],
+        "remote_preferred": true,
+        "job_type": "Full-time"
+    },
+    "eeo_responses": {
+        "gender": "Prefer not to answer",
+        "race_ethnicity": "Prefer not to answer",
+        "veteran_status": "Prefer not to answer",
+        "disability_status": "Prefer not to answer"
+    },
+    "default_answers": {
+        "willing_to_relocate": "No",
+        "sponsorship_required": "No",
+        "legally_authorized": "Yes",
+        "available_start_date": "30 days from offer",
+        "reason_for_change": "Looking for growth opportunities in a challenging environment",
+        "cover_letter_template": "Dear Hiring Manager,\n\nI am writing to express my interest in the {role} position at {company}. With {experience} years of experience in quality assurance and test automation, I bring a strong foundation in {skills}.\n\nI am particularly drawn to {company} for its commitment to quality and innovation. I am confident that my skills in manual testing, automation frameworks, and API testing would make me a valuable addition to your team.\n\nThank you for considering my application.\n\nBest regards,\n{name}"
+    }
+}

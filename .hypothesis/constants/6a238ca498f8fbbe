@@ -1,0 +1,4 @@
+# file: D:\KALPESH\UDEMY\STOCK TRADING\PROJECT Trading\Job scrapper\src\common\logger.py
+# hypothesis_version: 6.151.10
+
+[1024, '%H:%M:%S', '%Y-%m-%d', '%Y-%m-%d %H:%M:%S', 'job_scraper', 'logs', 'utf-8']

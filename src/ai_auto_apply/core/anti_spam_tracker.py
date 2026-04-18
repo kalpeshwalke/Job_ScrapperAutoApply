@@ -4,6 +4,7 @@ Anti-Spam Tracker
 Atomic Excel updater for preventing duplicate job applications.
 """
 
+import os
 import pandas as pd
 from pathlib import Path
 from datetime import datetime

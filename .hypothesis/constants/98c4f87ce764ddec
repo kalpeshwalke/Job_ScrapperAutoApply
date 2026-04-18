@@ -1,0 +1,4 @@
+# file: D:\KALPESH\UDEMY\STOCK TRADING\PROJECT Trading\Job scrapper\src\ai_auto_apply\config\retry_config.py
+# hypothesis_version: 6.151.10
+
+[1.0, 2.0, 30.0, 'Unknown error', 'attempts', 'captcha', 'error', 'operation', 'permanent', 'result', 'success']

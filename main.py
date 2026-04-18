@@ -44,7 +44,7 @@ from src.common.cache_layer import CacheLayer
 from src.common.deduplication_engine import DeduplicationEngine
 from src.common.scraper_manager import ScraperManager
 from src.common.browser_pool_manager import BrowserPoolManager
-from src.common.rate_limiter import RateLimiter
+from src.common.rate_limiter import RateLimiter as ScraperRateLimiter
 from src.common.excel_writer import (
     load_existing_data,
     get_known_links,
@@ -62,8 +62,8 @@ from src.scrapers.foundit_scraper import FounditScraper
 from src.ai_auto_apply.ui.cli_menu import CLIMenu
 from src.ai_auto_apply.core.career_page_validator import CareerPageValidator
 from src.ai_auto_apply.providers.ai_provider import AIProviderFactory
-from src.ai_auto_apply.core.orchestrator import FSMOrchestrator
-from src.ai_auto_apply.config.rate_limiter_ai import RateLimiter
+from src.ai_auto_apply.core.orchestrator_v2 import FSMOrchestratorV2
+from src.ai_auto_apply.config.rate_limiter_ai import RateLimiter as AIRateLimiter
 from src.ai_auto_apply.core.structured_logger import StructuredLogger
 
 logger = get_logger("main")
@@ -119,6 +119,17 @@ def execute_apply_mode(config):
                     print(f"[!] Required column '{col}' not found in Excel file")
                     print("    Please run Scraping Mode first to populate this column")
                     return
+
+            # Map Excel column names to internal canonical names if necessary
+            column_mapping = {
+                'Job Title': 'title',
+                'Job_Title': 'title',
+                'Company Career Page': 'career_page_url',
+                'Careers_URL': 'career_page_url',
+                'company': 'company',          # typically lowercase already or 'Company'
+                'Company': 'company',
+            }
+            df.rename(columns=column_mapping, inplace=True)
             
             logger.info("Loaded %d jobs from Excel", len(df))
         except Exception as e:
@@ -190,12 +201,12 @@ def execute_apply_mode(config):
         # 5. Initialize FSM orchestrator
         # ------------------------------------------------------------------
         try:
-            orchestrator = FSMOrchestrator(
+            orchestrator = FSMOrchestratorV2(
                 provider=provider,
                 config=auto_apply_config,
                 excel_path=config.master_file_path
             )
-            logger.info("FSM orchestrator initialized")
+            logger.info("FSMOrchestratorV2 initialized")
         except Exception as e:
             logger.error("Failed to initialize FSM orchestrator: %s", e)
             print(f"[!] Failed to initialize FSM orchestrator: {e}")
@@ -207,13 +218,13 @@ def execute_apply_mode(config):
         rate_limiter = None
         if auto_apply_config.get('rate_limiting', {}).get('enabled', False):
             try:
-                rate_limiter = RateLimiter(
+                rate_limiter = AIRateLimiter(
                     requests_per_minute=auto_apply_config['rate_limiting'].get('requests_per_minute', 15),
                     requests_per_day=auto_apply_config['rate_limiting'].get('requests_per_day', 1500)
                 )
-                logger.info("Rate limiter initialized")
+                logger.info("AI rate limiter initialized")
             except Exception as e:
-                logger.warning("Failed to initialize rate limiter: %s", e)
+                logger.warning("Failed to initialize AI rate limiter: %s", e)
                 rate_limiter = None
 
         # ------------------------------------------------------------------
@@ -222,65 +233,77 @@ def execute_apply_mode(config):
         print(f"\n[*] Starting auto-apply for {len(filtered_df)} jobs...")
         print("=" * 60)
         
-        for idx, row in filtered_df.iterrows():
-            job_start_time = time.time()
-            job_index = idx  # Excel row index
-            
-            logger.info("Processing job %d/%d: %s at %s", 
-                    idx + 1, len(filtered_df), row.get('title', 'Unknown'), row.get('company', 'Unknown'))
-            
-            print(f"\n[{idx + 1}/{len(filtered_df)}] {row.get('title', 'Unknown')} at {row.get('company', 'Unknown')}")
-            
-            # Apply rate limiting if enabled
-            if rate_limiter:
+        try:
+            for idx, row in filtered_df.iterrows():
+                job_start_time = time.time()
+                job_index = idx  # Excel row index
+                
+                logger.info("Processing job %d/%d: %s at %s", 
+                        idx + 1, len(filtered_df), row.get('title', 'Unknown'), row.get('company', 'Unknown'))
+                
+                print(f"\n[{idx + 1}/{len(filtered_df)}] {row.get('title', 'Unknown')} at {row.get('company', 'Unknown')}")
+                
+                # Apply rate limiting if enabled
+                if rate_limiter:
+                    try:
+                        rate_limiter.acquire()
+                    except Exception as e:
+                        logger.warning("Rate limit exceeded: %s", e)
+                        print(f"[!] Rate limit exceeded: {e}")
+                        break
+                
+                # Prepare job data for FSM
+                job_data = {
+                    'title': row.get('title', ''),
+                    'company': row.get('company', ''),
+                    'career_url': row.get('career_page_url', ''),
+                    'excel_index': job_index,
+                    'user_details': auto_apply_config.get('user_details', {})
+                }
+                
+                # Add resume path if configured
+                resume_path = auto_apply_config.get('resume_path', '')
+                if resume_path:
+                    job_data['resume_path'] = resume_path
+                
+                # Execute FSM for this job
                 try:
-                    rate_limiter.acquire()
+                    result = orchestrator.apply_to_job(job_data)
+                    
+                    # Track performance metrics
+                    performance_metrics['total_jobs_processed'] += 1
+                    if result['status'] == 'success':
+                        performance_metrics['successful_applications'] += 1
+                        print(f"   [OK] Success: {result.get('reason', 'Applied successfully')}")
+                    else:
+                        performance_metrics['failed_applications'] += 1
+                        print(f"   [FAIL] Failed: {result.get('reason', 'Unknown error')}")
+                    
+                    # Calculate job processing time
+                    job_time = time.time() - job_start_time
+                    logger.info("Job processed in %.2f seconds (status: %s)", job_time, result['status'])
+                    
                 except Exception as e:
-                    logger.warning("Rate limit exceeded: %s", e)
-                    print(f"[!] Rate limit exceeded: {e}")
-                    break
-            
-            # Prepare job data for FSM
-            job_data = {
-                'title': row.get('title', ''),
-                'company': row.get('company', ''),
-                'career_url': row.get('career_page_url', ''),
-                'excel_index': job_index,
-                'user_details': auto_apply_config.get('user_details', {})
-            }
-            
-            # Add resume path if configured
-            resume_path = auto_apply_config.get('resume_path', '')
-            if resume_path:
-                job_data['resume_path'] = resume_path
-            
-            # Execute FSM for this job
-            try:
-                result = orchestrator.apply_to_job(job_data)
-                
-                # Track performance metrics
-                performance_metrics['total_jobs_processed'] += 1
-                if result['status'] == 'success':
-                    performance_metrics['successful_applications'] += 1
-                    print(f"   [OK] Success: {result.get('reason', 'Applied successfully')}")
-                else:
+                    logger.error("FSM error for job at %s: %s", row.get('company', 'Unknown'), e, exc_info=True)
                     performance_metrics['failed_applications'] += 1
-                    print(f"   [FAIL] Failed: {result.get('reason', 'Unknown error')}")
+                    print(f"   [ERROR] Error: {str(e)[:100]}")
                 
-                # Calculate job processing time
-                job_time = time.time() - job_start_time
-                logger.info("Job processed in %.2f seconds (status: %s)", job_time, result['status'])
-                
-            except Exception as e:
-                logger.error("FSM error for job at %s: %s", row.get('company', 'Unknown'), e, exc_info=True)
-                performance_metrics['failed_applications'] += 1
-                print(f"   [ERROR] Error: {str(e)[:100]}")
-            
-            # Small delay between jobs (not artificial, just for logging)
-            time.sleep(0.5)
-        
+                # Small delay between jobs (not artificial, just for logging)
+                time.sleep(0.5)
+
+        except KeyboardInterrupt:
+            logger.warning("Batch interrupted by user (Ctrl+C)")
+            print("\n\n[!] Interrupted by user. Cleaning up...")
+
+        finally:
+            # ALWAYS close browser — even on Ctrl+C, even on exception
+            try:
+                orchestrator.close_browser()
+            except Exception:
+                pass
+
         # ------------------------------------------------------------------
-        # 8. Calculate performance metrics
+        # 9. Calculate performance metrics
         # ------------------------------------------------------------------
         performance_metrics['total_execution_time'] = time.time() - start_time
         
@@ -444,8 +467,8 @@ def execute_scraping_mode(config):
                 max_browsers=config.max_workers
             )
             
-            # Initialize RateLimiter
-            rate_limiter = RateLimiter(
+            # Initialize RateLimiter for scraping delays
+            rate_limiter = ScraperRateLimiter(
                 default_min_delay=config.random_delay_min,
                 default_max_delay=config.random_delay_max
             )
@@ -914,7 +937,7 @@ def _print_summary(
     
     # Log performance metrics with structured logger
     try:
-        from utils.ai_auto_apply.structured_logger import StructuredLogger
+        from src.ai_auto_apply.core.structured_logger import StructuredLogger
         structured_logger = StructuredLogger("scraping", {})
         structured_logger.log_performance_metrics(
             metrics_type="scraping_summary",
@@ -986,21 +1009,8 @@ def _send_email_notification(config, new_job_count: int):
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Main function
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n\n[!] Scraping interrupted by user")
-        logger.info("Scraping interrupted by user (Ctrl+C)")
-    except Exception as e:
-        logger.critical("Fatal error: %s", e)
-        logger.critical(traceback.format_exc())
-        print(f"\n[ERROR] Fatal error: {e}")
-        sys.exit(1)
-
-
 def main():
     """Main orchestrator function with mode selection."""
     print("\n" + "=" * 60)
@@ -1059,25 +1069,49 @@ def main():
         logger.error("Unexpected error in main: %s", e, exc_info=True)
         print(f"\n[!] Unexpected error: {e}")
         
-        if not auto_apply_config.get('enabled', False):
-            print("\n[!] Auto-apply is disabled in config.yaml")
-            print("    Set 'auto_apply.enabled: true' to enable")
-            return
-        
-        # Check if user details are configured
-        user_details = auto_apply_config.get('user_details', {})
-        if not user_details.get('name') or not user_details.get('email'):
-            print("\n[!] User details not configured")
-            print("    Please add your details to config.yaml:")
-            print("    auto_apply:")
-            print("      user_details:")
-            print("        name: \"Your Name\"")
-            print("        email: \"your@email.com\"")
-            print("        phone: \"your_phone\"")
-            return
-        
-        execute_apply_mode(config)
+        # Safely check auto_apply_config (might not be defined if error occurred early)
+        try:
+            if hasattr(config, 'auto_apply_config'):
+                auto_apply_config = config.auto_apply_config
+                
+                if not auto_apply_config.get('enabled', False):
+                    print("\n[!] Auto-apply is disabled in config.yaml")
+                    print("    Set 'auto_apply.enabled: true' to enable")
+                    return
+                
+                # Check if user details are configured
+                user_details = auto_apply_config.get('user_details', {})
+                if not user_details.get('name') or not user_details.get('email'):
+                    print("\n[!] User details not configured")
+                    print("    Please add your details to config.yaml:")
+                    print("    auto_apply:")
+                    print("      user_details:")
+                    print("        name: \"Your Name\"")
+                    print("        email: \"your@email.com\"")
+                    print("        phone: \"your_phone\"")
+                    return
+                
+                execute_apply_mode(config)
+        except Exception as inner_e:
+            logger.error("Error in exception handler: %s", inner_e)
+            print(f"\n[!] Failed to recover from error: {inner_e}")
     
     else:
         logger.error("Invalid mode selected: %s", mode)
         print(f"[!] Invalid mode: {mode}")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n[!] Scraping interrupted by user")
+        logger.info("Scraping interrupted by user (Ctrl+C)")
+    except Exception as e:
+        logger.critical("Fatal error: %s", e)
+        logger.critical(traceback.format_exc())
+        print(f"\n[ERROR] Fatal error: {e}")
+        sys.exit(1)

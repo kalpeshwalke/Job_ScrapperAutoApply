@@ -1,0 +1,4 @@
+# file: D:\KALPESH\UDEMY\STOCK TRADING\PROJECT Trading\Job scrapper\src\ai_auto_apply\core\career_page_validator.py
+# hypothesis_version: 6.151.10
+
+[200, '.', '/', 'Invalid URL format', 'Mozilla/5.0', 'No', 'Unchecked', 'User-Agent', 'Validating URL: %s', 'Yes', 'apply', 'career', 'career_page_url', 'careers', 'company', 'company_first_word', 'company_verified', 'employment', 'enabled', 'error_type', 'final_url', 'hiring', 'home', 'homepage_redirect', 'html.parser', 'http', 'index', 'index.htm', 'index.html', 'index.php', 'job', 'jobs', 'keyword_count', 'keyword_threshold', 'openings', 'opportunities', 'original_url', 'status_code', 'threshold', 'timeout_seconds', 'vacancies', 'validator', 'verify_company_name']

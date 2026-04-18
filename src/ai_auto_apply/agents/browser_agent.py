@@ -21,20 +21,37 @@ logger = get_logger("browser_agent")
 class BrowserAgent:
     """Low-level browser agent that executes DOM interactions with MCP and retry support"""
     
+    # Allowed tool names for validation
+    ALLOWED_TOOLS = {
+        'click_element',
+        'enter_text',
+        'select_option',
+        'upload_file',
+        'press_key',
+        'navigate'
+    }
+    
     SYSTEM_PROMPT = """You are a browser automation agent. You execute specific actions on web pages using DOM manipulation tools.
+
+AVAILABLE TOOLS (USE ONLY THESE):
+1. click_element(mmid) - Click an element
+2. enter_text(mmid, text) - Type text into an input field
+3. select_option(mmid, value) - Select an option from a dropdown menu
+4. upload_file(mmid, file_path) - Upload a file
+5. press_key(key) - Press a keyboard key (e.g., "Enter")
+6. navigate(url) - Navigate to a URL
+
+CRITICAL RULES:
+- NEVER invent tool names. Only use the 6 tools listed above.
+- If you cannot complete a step with these tools, report that you cannot complete it.
+- Do NOT create tools like 'apply_for_job', 'search_jobs', 'custom_search_engine', etc.
 
 You will receive:
 1. A step description from the Planner (what to do)
 2. Current DOM state (interactive elements with mmid attributes)
 3. Job details (for filling forms)
 
-Your task is to select the appropriate tool(s) to execute the step. You have access to these tools:
-- click_element(mmid): Click an element
-- enter_text(mmid, text): Type text into an input field
-- select_option(mmid, value): Select an option from a dropdown menu
-- upload_file(mmid, file_path): Upload a file
-- press_key(key): Press a keyboard key (e.g., "Enter")
-- navigate(url): Navigate to a URL
+Your task is to select the appropriate tool(s) to execute the step. You have access to the 6 tools listed above.
 
 Be precise - use the mmid attributes to target the correct elements. If the required element is not in the DOM state, report that you cannot complete the step."""
     
@@ -90,6 +107,24 @@ Be precise - use the mmid attributes to target the correct elements. If the requ
             f"retry_config={self.retry_config}, screenshots={'enabled' if self.screenshot_enabled else 'disabled'}, "
             f"network_monitoring={'enabled' if self.network_monitoring_enabled else 'disabled'}"
         )
+    
+    def validate_tool_call(self, tool_call: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+        """
+        Validate that tool_call uses an allowed tool name.
+        
+        Args:
+            tool_call: Tool call dictionary with "name" and "arguments" keys
+            
+        Returns:
+            (is_valid, error_message) tuple where:
+            - is_valid: True if tool name is in ALLOWED_TOOLS, False otherwise
+            - error_message: None if valid, error message string if invalid
+        """
+        tool_name = tool_call.get("name", "")
+        if tool_name not in self.ALLOWED_TOOLS:
+            allowed_tools_list = ', '.join(sorted(self.ALLOWED_TOOLS))
+            return False, f"Invalid tool '{tool_name}'. Allowed tools: {allowed_tools_list}"
+        return True, None
     
     def set_page(self, page: Any):
         """
@@ -341,9 +376,10 @@ Be precise - use the mmid attributes to target the correct elements. If the requ
         use_mcp: bool = None
     ) -> Dict[str, Any]:
         """
-        Execute a step using MCP or legacy approach (hybrid mode).
+        Execute a step using MCP or legacy approach (hybrid mode) with connection recovery.
         
-        Tries MCP first when enabled, falls back to legacy DOM_Toolkit on MCP failure.
+        Tries MCP first when enabled, attempts reconnection on connection lost,
+        falls back to legacy DOM_Toolkit on MCP failure.
         
         Args:
             step: Step description from Planner
@@ -374,9 +410,53 @@ Be precise - use the mmid attributes to target the correct elements. If the requ
                 self._log_network_requests()
                 return mcp_result
             else:
+                error_msg = mcp_result.get('error', 'Unknown error')
+                
+                # Check if error indicates connection lost
+                connection_lost_indicators = [
+                    "connection closed",
+                    "connection lost",
+                    "broken pipe",
+                    "not connected",
+                    "connection refused",
+                    "stdin not available",
+                    "stdout not available"
+                ]
+                
+                is_connection_lost = any(
+                    indicator in error_msg.lower() 
+                    for indicator in connection_lost_indicators
+                )
+                
+                if is_connection_lost:
+                    logger.warning(f"MCP connection lost detected: {error_msg}")
+                    logger.info("Attempting to reconnect MCP client...")
+                    
+                    # Attempt to reconnect once
+                    try:
+                        if self.mcp_client.connect():
+                            logger.info("MCP reconnection successful, retrying operation")
+                            
+                            # Retry the operation after successful reconnection
+                            retry_result = self._execute_step_mcp(step, dom_state, job_data)
+                            
+                            if retry_result.get("success", False):
+                                logger.info("MCP execution succeeded after reconnection")
+                                self._log_network_requests()
+                                return retry_result
+                            else:
+                                logger.warning(
+                                    f"MCP execution failed after reconnection: {retry_result.get('error')}. "
+                                    "Falling back to legacy"
+                                )
+                        else:
+                            logger.error("MCP reconnection failed, falling back to legacy")
+                    except Exception as reconnect_error:
+                        logger.error(f"MCP reconnection attempt failed: {reconnect_error}")
+                
                 # MCP failed - fall back to legacy
                 logger.warning(
-                    f"MCP execution failed: {mcp_result.get('error', 'Unknown error')}. "
+                    f"MCP execution failed: {error_msg}. "
                     "Falling back to legacy DOM_Toolkit"
                 )
                 result = self._execute_step_legacy(step, dom_state, dom_toolkit, job_data)
@@ -413,7 +493,12 @@ Be precise - use the mmid attributes to target the correct elements. If the requ
         job_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Execute step using MCP tools.
+        Execute step using MCP tools with comprehensive error handling.
+        
+        Translates high-level step into MCP tool calls:
+        - "Click on careers link" -> playwright_click
+        - "Fill form field" -> playwright_fill
+        - "Navigate to URL" -> playwright_navigate
         
         Args:
             step: Step description
@@ -421,28 +506,201 @@ Be precise - use the mmid attributes to target the correct elements. If the requ
             job_data: Job details
             
         Returns:
-            Execution result dictionary
+            Execution result dictionary with success, action_summary, and error fields
         """
+        current_url = dom_state.get("url", "unknown")
+        
         try:
-            # TODO: Implement MCP-based execution
-            # This would involve:
-            # 1. Translating step + dom_state into MCP tool calls
-            # 2. Executing MCP tools via self.mcp_client.call_tool()
-            # 3. Handling results and errors
+            step_lower = step.lower()
             
-            # For now, return not implemented
+            # Parse step to determine action type
+            if "click" in step_lower:
+                # Extract selector from step or dom_state
+                selector = self._extract_selector_from_step(step, dom_state)
+                if selector:
+                    logger.debug(f"MCP: Executing click on selector: {selector}")
+                    result = self.mcp_client.call_tool(
+                        "playwright_click",
+                        {"selector": selector}
+                    )
+                    
+                    # Log error details if failed
+                    if not result.get("success"):
+                        error_msg = result.get("error", "Unknown error")
+                        logger.error(
+                            f"MCP click failed: tool=playwright_click, selector={selector}, "
+                            f"error={error_msg}, url={current_url}"
+                        )
+                    
+                    return {
+                        "success": result.get("success", False),
+                        "action_summary": f"Clicked element: {selector}",
+                        "error": result.get("error")
+                    }
+                else:
+                    logger.error(f"MCP: Could not extract selector from step: {step}")
+                    return {
+                        "success": False,
+                        "error": "Could not extract selector from step",
+                        "action_summary": "No action taken"
+                    }
+            
+            elif "fill" in step_lower or "enter" in step_lower:
+                selector, text = self._extract_fill_params(step, dom_state, job_data)
+                if selector and text:
+                    logger.debug(f"MCP: Executing fill on selector: {selector}")
+                    result = self.mcp_client.call_tool(
+                        "playwright_fill",
+                        {"selector": selector, "value": text}
+                    )
+                    
+                    # Log error details if failed
+                    if not result.get("success"):
+                        error_msg = result.get("error", "Unknown error")
+                        logger.error(
+                            f"MCP fill failed: tool=playwright_fill, selector={selector}, "
+                            f"error={error_msg}, url={current_url}"
+                        )
+                    
+                    return {
+                        "success": result.get("success", False),
+                        "action_summary": f"Filled field: {selector}",
+                        "error": result.get("error")
+                    }
+                else:
+                    logger.error(f"MCP: Could not extract fill parameters from step: {step}")
+                    return {
+                        "success": False,
+                        "error": "Could not extract fill parameters from step",
+                        "action_summary": "No action taken"
+                    }
+            
+            elif "navigate" in step_lower:
+                url = self._extract_url_from_step(step)
+                if url:
+                    logger.debug(f"MCP: Executing navigate to URL: {url}")
+                    result = self.mcp_client.call_tool(
+                        "playwright_navigate",
+                        {"url": url}
+                    )
+                    
+                    # Log error details if failed
+                    if not result.get("success"):
+                        error_msg = result.get("error", "Unknown error")
+                        logger.error(
+                            f"MCP navigate failed: tool=playwright_navigate, target_url={url}, "
+                            f"error={error_msg}, current_url={current_url}"
+                        )
+                    
+                    return {
+                        "success": result.get("success", False),
+                        "action_summary": f"Navigated to: {url}",
+                        "error": result.get("error")
+                    }
+                else:
+                    logger.error(f"MCP: Could not extract URL from step: {step}")
+                    return {
+                        "success": False,
+                        "error": "Could not extract URL from step",
+                        "action_summary": "No action taken"
+                    }
+            
+            # If no action matched, return error
+            logger.warning(f"MCP: Could not translate step to MCP action: {step}")
             return {
                 "success": False,
-                "error": "MCP execution not yet fully implemented",
-                "action_summary": "MCP execution pending"
+                "error": f"Could not translate step to MCP action: {step}",
+                "action_summary": "No action taken"
             }
+            
         except Exception as e:
-            logger.error(f"MCP execution error: {e}", exc_info=True)
+            # Comprehensive error logging with context
+            error_type = type(e).__name__
+            error_msg = str(e)
+            logger.error(
+                f"MCP execution exception: error_type={error_type}, error={error_msg}, "
+                f"step={step}, url={current_url}",
+                exc_info=True
+            )
+            
             return {
                 "success": False,
-                "error": str(e),
-                "action_summary": f"MCP error: {str(e)}"
+                "error": f"{error_type}: {error_msg}",
+                "action_summary": f"MCP error: {error_msg}"
             }
+    
+    def _extract_selector_from_step(self, step: str, dom_state: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract CSS selector from step description and DOM state.
+        
+        Uses pattern matching to identify target element from step text.
+        
+        Args:
+            step: Step description
+            dom_state: Current DOM state
+            
+        Returns:
+            CSS selector or None
+        """
+        # Simple implementation: look for mmid in step
+        # More sophisticated: use AI to match step text to DOM elements
+        import re
+        mmid_match = re.search(r'mmid[=:]?\s*["\']?(\d+)["\']?', step)
+        if mmid_match:
+            mmid = mmid_match.group(1)
+            return f"[mmid='{mmid}']"
+        
+        # Fallback: return None (will trigger error in caller)
+        return None
+    
+    def _extract_fill_params(
+        self, 
+        step: str, 
+        dom_state: Dict[str, Any], 
+        job_data: Dict[str, Any]
+    ) -> tuple[Optional[str], Optional[str]]:
+        """
+        Extract selector and text value for fill operation.
+        
+        Args:
+            step: Step description
+            dom_state: Current DOM state
+            job_data: Job details
+            
+        Returns:
+            (selector, text_value) tuple
+        """
+        # Extract selector
+        selector = self._extract_selector_from_step(step, dom_state)
+        
+        # Extract text value from step or job_data
+        # Simple implementation: look for quoted text in step
+        import re
+        text_match = re.search(r'["\']([^"\']+)["\']', step)
+        if text_match:
+            text = text_match.group(1)
+            return (selector, text)
+        
+        # Fallback: return None
+        return (selector, None)
+    
+    def _extract_url_from_step(self, step: str) -> Optional[str]:
+        """
+        Extract URL from step description.
+        
+        Args:
+            step: Step description
+            
+        Returns:
+            URL or None
+        """
+        import re
+        # Look for URL pattern
+        url_match = re.search(r'https?://[^\s]+', step)
+        if url_match:
+            return url_match.group(0)
+        
+        return None
     
     def _execute_step_legacy(
         self,
@@ -509,10 +767,24 @@ Be precise - use the mmid attributes to target the correct elements. If the requ
                     tool_args_str = tool_call["function"]["arguments"]
                     # Parse arguments if they're a JSON string
                     tool_args = json.loads(tool_args_str) if isinstance(tool_args_str, str) else tool_args_str
+                    # Normalize to direct format for validation
+                    normalized_tool_call = {"name": tool_name, "arguments": tool_args}
                 else:
                     # Direct format: {"name": "...", "arguments": {...}}
                     tool_name = tool_call["name"]
                     tool_args = tool_call["arguments"]
+                    normalized_tool_call = tool_call
+                
+                # Validate tool name before execution
+                is_valid, error_msg = self.validate_tool_call(normalized_tool_call)
+                if not is_valid:
+                    logger.error(f"Tool hallucination detected: {error_msg}")
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "error_type": "HALLUCINATION_ERROR",
+                        "tool_name": normalized_tool_call.get("name")
+                    }
                 
                 if self.log_interactions:
                     # Log with structured logger

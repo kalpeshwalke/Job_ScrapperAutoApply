@@ -6,6 +6,9 @@ import requests
 from typing import Dict, List, Any
 import json
 from src.ai_auto_apply.providers.ai_provider import AIProvider, AIResponse, RateLimits
+from src.common.logger import get_logger
+
+logger = get_logger("ollama_provider")
 
 
 class OllamaProvider(AIProvider):
@@ -21,23 +24,32 @@ class OllamaProvider(AIProvider):
         context: Dict[str, Any]
     ) -> AIResponse:
         """Generate JSON response using Ollama"""
-        response = requests.post(
-            f"{self.base_url}/api/generate",
-            json={
-                "model": self.model,
-                "prompt": f"{prompt}\n\nContext: {context}\n\nRespond with valid JSON only.",
-                "stream": False,
-                "format": "json"
-            }
-        )
-        
-        result = response.json()
-        
-        return AIResponse(
-            content=result["response"],
-            finish_reason="stop",
-            usage=None  # Ollama doesn't provide token counts
-        )
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": f"{prompt}\n\nContext: {context}\n\nRespond with valid JSON only.",
+                    "stream": False,
+                    "format": "json"
+                },
+                timeout=180
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            return AIResponse(
+                content=result["response"],
+                finish_reason="stop",
+                usage=None  # Ollama doesn't provide token counts
+            )
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ollama API request failed: {e}")
+            raise RuntimeError(f"Failed to connect to Ollama at {self.base_url}. Is Ollama running?") from e
+        except (KeyError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to parse Ollama response: {e}")
+            raise RuntimeError("Ollama returned invalid response format") from e
     
     def generate_browser_response(
         self, 
@@ -63,40 +75,47 @@ Respond with JSON in this format:
 }}
 """
         
-        response = requests.post(
-            f"{self.base_url}/api/generate",
-            json={
-                "model": self.model,
-                "prompt": full_prompt,
-                "stream": False,
-                "format": "json"
-            }
-        )
-        
-        result = response.json()
-        
         try:
-            tool_response = json.loads(result["response"])
-        except (json.JSONDecodeError, KeyError) as e:
-            # Local models often return garbled JSON — return empty tool calls
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": full_prompt,
+                    "stream": False,
+                    "format": "json"
+                },
+                timeout=180
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            try:
+                tool_response = json.loads(result["response"])
+            except (json.JSONDecodeError, KeyError) as e:
+                # Local models often return garbled JSON — return empty tool calls
+                logger.warning(f"Ollama returned malformed JSON: {e}. Response: {result.get('response', '')[:200]}")
+                return AIResponse(
+                    content=result.get("response", ""),
+                    tool_calls=None,
+                    finish_reason="stop",
+                    usage=None
+                )
+            
+            tool_calls = [{
+                "name": tool_response.get("tool_name", ""),
+                "arguments": tool_response.get("arguments", {})
+            }]
+            
             return AIResponse(
-                content=result.get("response", ""),
-                tool_calls=None,
+                content="",
+                tool_calls=tool_calls,
                 finish_reason="stop",
                 usage=None
             )
-        
-        tool_calls = [{
-            "name": tool_response.get("tool_name", ""),
-            "arguments": tool_response.get("arguments", {})
-        }]
-        
-        return AIResponse(
-            content="",
-            tool_calls=tool_calls,
-            finish_reason="stop",
-            usage=None
-        )
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ollama API request failed: {e}")
+            raise RuntimeError(f"Failed to connect to Ollama at {self.base_url}. Is Ollama running?") from e
     
     def get_provider_name(self) -> str:
         return "ollama"
@@ -113,10 +132,16 @@ Respond with JSON in this format:
     
     def validate_availability(self) -> bool:
         try:
-            response = requests.get(f"{self.base_url}/api/tags")
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
             models = response.json()["models"]
-            return any(m["name"] == self.model for m in models)
-        except Exception:
+            model_names = [m["name"] for m in models]
+            # Check both exact match and with :latest tag
+            is_available = self.model in model_names or f"{self.model}:latest" in model_names
+            if not is_available:
+                logger.warning(f"Model '{self.model}' not found. Available models: {model_names}")
+            return is_available
+        except Exception as e:
+            logger.error(f"Ollama availability check failed: {e}")
             return False
     
     def _format_tools_for_prompt(self, tools: List[Dict[str, Any]]) -> str:

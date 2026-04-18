@@ -1,0 +1,4 @@
+# file: D:\KALPESH\UDEMY\STOCK TRADING\PROJECT Trading\Job scrapper\src\ai_auto_apply\config\browser_errors.py
+# hypothesis_version: 6.151.10
+
+['429', 'bot detection', 'captcha', 'cloudflare', 'connection', 'connectionerror', 'element not found', 'element not visible', 'hallucination', 'network', 'networkerror', 'permanent', 'quota exceeded', 'rate limit', 'rate_limit', 'recaptcha', 'recoverable', 'retry', 'security check', 'stale element', 'temporary', 'throttled', 'timed out', 'timeout', 'timeouterror', 'too many requests', 'verify you are human', 'waiting for']
